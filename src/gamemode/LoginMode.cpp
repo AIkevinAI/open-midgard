@@ -223,8 +223,7 @@ CHARACTER_INFO ExpandLegacyCharacterInfo(const LEGACY_CHARACTER_INFO_106& legacy
 {
     CHARACTER_INFO info{};
     std::memcpy(&info, &legacy, sizeof(legacy));
-    info.CharNum = static_cast<u8>(legacy.CharNum & 0xFFu);
-    info.haircolor = static_cast<u8>(std::clamp<int>(legacy.headpalette, 0, 0xFF));
+    info.CharNum = legacy.CharNum;
     info.bIsChangedCharName = 1;
     return info;
 }
@@ -1681,7 +1680,7 @@ void CLoginMode::OnChangeState(int newState) {
             break;
         }
 
-        const u8 charNum = m_charInfo[m_selectedCharIndex].CharNum;
+        const u16 charNum = m_charInfo[m_selectedCharIndex].CharNum;
         g_session.SetSelectedCharacterAppearance(m_charInfo[m_selectedCharIndex]);
         DbgLog("[Login] Selecting char slot %d (name='%.24s')\n",
                (int)charNum, reinterpret_cast<const char*>(m_charInfo[m_selectedCharIndex].name));
@@ -2322,7 +2321,7 @@ void CLoginMode::OnAcceptChar(const std::vector<u8>& raw)
            static_cast<int>(m_charInfo[0].accessory2),
            static_cast<int>(m_charInfo[0].headpalette),
            static_cast<int>(m_charInfo[0].bodypalette),
-           static_cast<unsigned int>(m_charInfo[0].haircolor));
+            static_cast<unsigned int>(m_charInfo[0].headpalette));
 
     for (int index = 0; index < m_numChar; ++index) {
         const int job = static_cast<int>(m_charInfo[index].job);

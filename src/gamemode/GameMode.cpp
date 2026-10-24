@@ -699,6 +699,24 @@ void DrawBootstrapSceneTextQt(unsigned int* pixels,
     int groundHeight,
     int activeWidth,
     int activeHeight);
+#else
+
+bool MeasureOverlayTextQt(const std::string&, SIZE*)
+{
+    return false;
+}
+
+void DrawOutlinedTextQtToOverlay(
+    unsigned int*,
+    int,
+    int,
+    int,
+    int,
+    int,
+    const std::string&,
+    COLORREF)
+{
+}
 #endif
 
 inline unsigned int PackOverlayRgb(COLORREF color)

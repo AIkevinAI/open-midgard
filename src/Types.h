@@ -116,9 +116,8 @@ struct CHARACTER_INFO
     u8  Int;
     u8  Dex;
     u8  Luk;
-    u8  CharNum;
-    u8  haircolor;
-    s16 bIsChangedCharName;
+    u16 CharNum;              // server writes int16 slot here
+    s16 bIsChangedCharName;   // server writes int16 rename here
 };
 
 enum class DragType : int {

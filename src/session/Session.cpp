@@ -1471,7 +1471,7 @@ void CSession::SetSelectedCharacterAppearance(const CHARACTER_INFO& info)
         static_cast<int>(info.accessory2),
         static_cast<int>(info.headpalette),
         static_cast<int>(info.bodypalette),
-        static_cast<unsigned int>(info.haircolor),
+        static_cast<unsigned int>(info.headpalette),
         info.effectstate,
         static_cast<unsigned int>(info.CharNum),
         reinterpret_cast<const char*>(info.name));

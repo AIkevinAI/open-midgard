@@ -235,7 +235,7 @@ void BlitMotionToArgb(unsigned int* dest, int destW, int destH, int baseX, int b
 
         const bool flipX = (clip.flags & 1) != 0;
         const int imgOffX = clip.x - image->width / 2;
-        const int imgOffY = clip.y - image->height / 2;
+        const int imgOffY = -clip.y - image->height / 2;
         for (int sy = 0; sy < image->height; ++sy) {
             const int dy = baseY + imgOffY + sy;
             if (dy < 0 || dy >= destH) {
@@ -286,7 +286,7 @@ bool ComputeMotionClipBounds(CSprRes* sprRes, const CMotion* motion, RECT* outBo
         }
 
         const int drawX = clip.x - image->width / 2;
-        const int drawY = clip.y - image->height / 2;
+        const int drawY = -clip.y - image->height / 2;
         RECT current = { drawX, drawY, drawX + image->width, drawY + image->height };
         if (!hasClip) {
             clipBox = current;

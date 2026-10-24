@@ -234,7 +234,7 @@ bool CSprRes::LoadFromBuffer(const char* fName, const unsigned char* buffer, int
 
         const size_t pixelCount = static_cast<size_t>(image->width) * static_cast<size_t>(image->height);
         image->rgba.resize(pixelCount);
-        for (int y = image->height - 1; y >= 0; --y) {
+        for (int y = 0; y < image->height; ++y) {
             for (int x = 0; x < image->width; ++x) {
                 unsigned char rgba[4];
                 if (!ReadBytes(cursor, end, rgba, sizeof(rgba))) {

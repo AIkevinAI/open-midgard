@@ -394,9 +394,17 @@ UIBasicInfoWnd::UIBasicInfoWnd()
 {
     Create(kFullWidth, kFullHeight);
     Move(0, 0);
-    int savedX = m_x;
-    int savedY = m_y;
+    int savedX = 0;
+    int savedY = 0;
     if (LoadUiWindowPlacement("BasicInfoWnd", &savedX, &savedY)) {
+        RECT rc{};
+        if (g_hMainWnd && GetClientRect(g_hMainWnd, &rc)) {
+            if (savedX < 0 || savedX > rc.right - m_w ||
+                savedY < 0 || savedY > rc.bottom - m_h) {
+                savedX = 0;
+                savedY = 0;
+            }
+        }
         g_windowMgr.ClampWindowToClient(&savedX, &savedY, m_w, m_h);
         Move(savedX, savedY);
     }

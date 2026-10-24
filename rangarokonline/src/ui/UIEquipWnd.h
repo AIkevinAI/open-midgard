@@ -1,0 +1,99 @@
+#pragma once
+
+#include "UIFrameWnd.h"
+#include "UIShopCommon.h"
+
+#include <array>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+class UIBitmapButton;
+class QImage;
+struct ITEM_INFO;
+
+class UIEquipWnd : public UIFrameWnd {
+public:
+    struct QtButtonDisplay {
+        int id = 0;
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        std::string label;
+        bool visible = true;
+    };
+
+    struct DisplaySlot {
+        int x = 0;
+        int y = 0;
+        int width = 0;
+        int height = 0;
+        bool occupied = false;
+        bool hovered = false;
+        bool leftColumn = false;
+        unsigned int itemId = 0;
+        std::string label;
+    };
+
+    struct DisplayData {
+        std::vector<DisplaySlot> displaySlots;
+    };
+
+    UIEquipWnd();
+    ~UIEquipWnd() override;
+
+    void SetShow(int show) override;
+    void Move(int x, int y) override;
+    bool IsUpdateNeed() override;
+    msgresult_t SendMsg(UIWindow* sender, int msg, msgparam_t wparam, msgparam_t lparam, msgparam_t extra) override;
+    void OnCreate(int x, int y) override;
+    void OnDestroy() override;
+    void OnDraw() override;
+    void OnLBtnDown(int x, int y) override;
+    void OnLBtnUp(int x, int y) override;
+    void OnRBtnDown(int x, int y) override;
+    void OnMouseMove(int x, int y) override;
+    void OnMouseHover(int x, int y) override;
+    void OnLBtnDblClk(int x, int y) override;
+    void DragAndDrop(int x, int y, const DRAG_INFO* const info) override;
+    void StoreInfo() override;
+    bool IsMiniMode() const;
+    bool GetDisplayDataForQt(DisplayData* outData) const;
+    bool GetHoveredItemForQt(shopui::ItemHoverInfo* outData) const;
+    int GetQtSystemButtonCount() const;
+    bool GetQtSystemButtonDisplayForQt(int index, QtButtonDisplay* outData) const;
+    bool BuildQtPreviewImage(QImage* outImage) const;
+    unsigned long long GetQtPreviewRevision() const;
+
+private:
+    void EnsureCreated();
+    void LayoutChildren();
+    void LoadAssets();
+    void ReleaseAssets();
+    void SetMiniMode(bool miniMode);
+    void UpdateHoveredSlot(int globalX, int globalY);
+    std::vector<const ITEM_INFO*> BuildSlotAssignments() const;
+    const shopui::BitmapPixels* GetItemIcon(const ITEM_INFO& item);
+    unsigned long long BuildVisualStateToken() const;
+
+    bool m_controlsCreated;
+    int m_fullHeight;
+    std::array<UIBitmapButton*, 3> m_systemButtons;
+    shopui::BitmapPixels m_backgroundLeft;
+    shopui::BitmapPixels m_backgroundMid;
+    shopui::BitmapPixels m_backgroundRight;
+    shopui::BitmapPixels m_backgroundFull;
+    shopui::BitmapPixels m_titleBarLeft;
+    shopui::BitmapPixels m_titleBarMid;
+    shopui::BitmapPixels m_titleBarRight;
+    std::unordered_map<unsigned int, shopui::BitmapPixels> m_iconCache;
+    int m_hoveredSlot;
+    bool m_dragArmed;
+    POINT m_dragStartPoint;
+    unsigned int m_dragItemId;
+    unsigned int m_dragItemIndex;
+    int m_dragItemEquipLocation;
+    unsigned long long m_lastVisualStateToken;
+    bool m_hasVisualStateToken;
+};

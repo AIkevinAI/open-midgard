@@ -1,0 +1,3764 @@
+#include "QtUiStateAdapter.h"
+
+#include "QtUiState.h"
+
+#include "QtUiStatusIconCatalog.h"
+
+#include "network/Connection.h"
+#include "network/MapSendProfile.h"
+#include "network/Packet.h"
+#include "core/ClientInfoLocale.h"
+#include "gamemode/GameMode.h"
+#include "gamemode/PacketPadding.h"
+#include "gamemode/View.h"
+#include "main/WinMain.h"
+#include "render3d/RenderBackend.h"
+#include "render3d/RenderDevice.h"
+#include "session/Session.h"
+#include "skill/Skill.h"
+#include "ui/UiScale.h"
+#include "ui/UILoginWnd.h"
+#include "ui/UILoadingWnd.h"
+#include "ui/UIMakeCharWnd.h"
+#include "ui/UIChooseWnd.h"
+#include "ui/UIJoinPartyAcceptWnd.h"
+#include "ui/UIChooseSellBuyWnd.h"
+#include "ui/UIBasicInfoWnd.h"
+#include "ui/UIEquipWnd.h"
+#include "ui/UIItemCollectionWnd.h"
+#include "ui/UIItemCompositionWnd.h"
+#include "ui/UIItemIdentifyWnd.h"
+#include "ui/UIItemInfoWnd.h"
+#include "ui/UIItemWnd.h"
+#include "ui/UIMessengerGroupWnd.h"
+#include "ui/UIPartyOptionWnd.h"
+#include "ui/UIStorageWnd.h"
+#include "ui/UIItemPurchaseWnd.h"
+#include "ui/UIItemSellWnd.h"
+#include "ui/UIItemShopWnd.h"
+#include "ui/UISelectCartWnd.h"
+#include "ui/UIMinimapWnd.h"
+#include "ui/UINewChatWnd.h"
+#include "ui/UINpcMenuWnd.h"
+#include "ui/UIPlayerContextMenuWnd.h"
+#include "ui/UINpcInputWnd.h"
+#include "ui/UINotifyLevelUpWnd.h"
+#include "ui/UIOptionWnd.h"
+#include "ui/UIRechargeGage.h"
+#include "ui/UISelectCharWnd.h"
+#include "ui/UISelectServerWnd.h"
+#include "ui/UISayDialogWnd.h"
+#include "ui/UISkillDescribeWnd.h"
+#include "ui/UISkillListWnd.h"
+#include "ui/UIShortCutWnd.h"
+#include "ui/UIStatusWnd.h"
+#include "ui/UIShopCommon.h"
+#include "ui/UIWaitWnd.h"
+#include "ui/UIWindowMgr.h"
+#include "world/GameActor.h"
+#include "world/World.h"
+
+#include <QChar>
+#include <QFont>
+#include <QFontMetrics>
+#include <QStringList>
+#include <QVariantMap>
+
+#include <cstdio>
+#include <string>
+#include <vector>
+
+namespace {
+
+constexpr DWORD kHoverNameRequestCooldownMs = 1000;
+constexpr int kQtActorLabelVerticalOffset = 10;
+constexpr int kQtSpeechBubbleMaxTextWidth = 200;
+constexpr int kQtStatusIconSize = 56;
+constexpr int kQtStatusIconSpacing = 6;
+constexpr int kQtStatusIconTopMargin = 6;
+
+bool IsGameplayUiSuppressed(const QtUiState* state)
+{
+    return state && state->loadingVisible();
+}
+
+QString BuildWallpaperRevisionText()
+{
+    if (!g_windowMgr.m_loadedWallpaperPath.empty()) {
+        return QString::fromLocal8Bit(g_windowMgr.m_loadedWallpaperPath.c_str());
+    }
+    return QStringLiteral("none");
+}
+
+template <typename TWindow>
+bool IsGameplayWindowVisible(const QtUiState* state, const TWindow* window)
+{
+    return window && window->m_show != 0 && !IsGameplayUiSuppressed(state);
+}
+
+void ClearGameplayUiState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    state->setNpcMenuVisible(false);
+    state->setNpcMenuGeometry(0, 0, 0, 0);
+    state->setNpcMenuSelection(-1);
+    state->setNpcMenuHoverIndex(-1);
+    state->setNpcMenuButtons(false, false);
+    state->setNpcMenuOptions(QVariantList{});
+    state->setNpcMenuButtonsData(QVariantList{});
+
+    state->setSayDialogVisible(false);
+    state->setSayDialogGeometry(0, 0, 0, 0);
+    state->setSayDialogText(QString());
+    state->setSayDialogAction(false, QString(), false, false);
+    state->setSayDialogActionButton(QVariantMap{});
+
+    state->setNpcInputVisible(false);
+    state->setNpcInputGeometry(0, 0, 0, 0);
+    state->setNpcInputText(QString(), QString());
+    state->setNpcInputButtons(false, false);
+    state->setNpcInputButtonsData(QVariantList{});
+
+    state->setChooseMenuVisible(false);
+    state->setChooseMenuGeometry(0, 0, 0, 0);
+    state->setChooseMenuSelectedIndex(-1);
+    state->setChooseMenuPressedIndex(-1);
+    state->setChooseMenuOptions(QVariantList{});
+
+    state->setItemShopVisible(false);
+    state->setItemShopGeometry(0, 0, 0, 0);
+    state->setItemShopTitle(QString());
+    state->setItemShopData(QVariantMap{});
+    state->setItemShopRows(QVariantList{});
+
+    state->setItemPurchaseVisible(false);
+    state->setItemPurchaseGeometry(0, 0, 0, 0);
+    state->setItemPurchaseTotal(0);
+    state->setItemPurchaseData(QVariantMap{});
+    state->setItemPurchaseRows(QVariantList{});
+    state->setItemPurchaseButtons(QVariantList{});
+
+    state->setItemSellVisible(false);
+    state->setItemSellGeometry(0, 0, 0, 0);
+    state->setItemSellTotal(0);
+    state->setItemSellData(QVariantMap{});
+    state->setItemSellRows(QVariantList{});
+    state->setItemSellButtons(QVariantList{});
+
+    state->setShortCutVisible(false);
+    state->setShortCutGeometry(0, 0, 0, 0);
+    state->setShortCutPage(0);
+    state->setShortCutHoverSlot(-1);
+    state->setShortCutSlots(QVariantList{});
+
+    state->setBasicInfoVisible(false);
+    state->setBasicInfoGeometry(0, 0, 0, 0);
+    state->setBasicInfoMini(false);
+    state->setBasicInfoData(QVariantMap{});
+
+    state->setStatusVisible(false);
+    state->setStatusGeometry(0, 0, 0, 0);
+    state->setStatusMini(false);
+    state->setStatusPage(0);
+    state->setStatusData(QVariantMap{});
+
+    state->setChatWindowVisible(false);
+    state->setChatWindowGeometry(0, 0, 0, 0);
+    state->setChatWindowInputActive(false);
+    state->setChatWindowWhisperInputActive(false);
+    state->setChatWindowMessageInputActive(false);
+    state->setChatWindowWhisperTargetText(QString());
+    state->setChatWindowInputText(QString());
+    state->setChatWindowLines(QVariantList{});
+    state->setChatWindowScrollBar(QVariantMap{});
+    state->setChatWindowUi(QVariantMap{});
+
+    state->setRechargeGaugeVisible(false);
+    state->setRechargeGaugeGeometry(0, 0, 0, 0);
+    state->setRechargeGaugeProgress(0, 0);
+
+    state->setInventoryVisible(false);
+    state->setInventoryGeometry(0, 0, 0, 0);
+    state->setInventoryMini(false);
+    state->setInventoryTab(0);
+    state->setInventoryData(QVariantMap{});
+
+    state->setStorageVisible(false);
+    state->setStorageGeometry(0, 0, 0, 0);
+    state->setStorageMini(false);
+    state->setStorageTab(0);
+    state->setStorageData(QVariantMap{});
+
+    state->setFriendPartyVisible(false);
+    state->setFriendPartyGeometry(0, 0, 0, 0);
+    state->setFriendPartyData(QVariantMap{});
+
+    state->setPartySetupVisible(false);
+    state->setPartySetupGeometry(0, 0, 0, 0);
+    state->setPartySetupData(QVariantMap{});
+
+    state->setPartyInviteVisible(false);
+    state->setPartyInviteGeometry(0, 0, 0, 0);
+    state->setPartyInviteData(QVariantMap{});
+
+    state->setEquipVisible(false);
+    state->setEquipGeometry(0, 0, 0, 0);
+    state->setEquipMini(false);
+    state->setEquipData(QVariantMap{});
+
+    state->setSkillListVisible(false);
+    state->setSkillListGeometry(0, 0, 0, 0);
+    state->setSkillListData(QVariantMap{});
+
+    state->setItemInfoVisible(false);
+    state->setItemInfoGeometry(0, 0, 0, 0);
+    state->setItemInfoData(QVariantMap{});
+
+    state->setSkillDescribeVisible(false);
+    state->setSkillDescribeGeometry(0, 0, 0, 0);
+    state->setSkillDescribeData(QVariantMap{});
+
+    state->setItemCollectionVisible(false);
+    state->setItemCollectionGeometry(0, 0, 0, 0);
+    state->setItemCollectionData(QVariantMap{});
+
+    state->setItemIdentifyVisible(false);
+    state->setItemIdentifyGeometry(0, 0, 0, 0);
+    state->setItemIdentifyData(QVariantMap{});
+
+    state->setItemCompositionVisible(false);
+    state->setItemCompositionGeometry(0, 0, 0, 0);
+    state->setItemCompositionData(QVariantMap{});
+
+    state->setOptionVisible(false);
+    state->setOptionGeometry(0, 0, 0, 0);
+    state->setOptionData(QVariantMap{});
+
+    state->setMinimapVisible(false);
+    state->setMinimapGeometry(0, 0, 0, 0);
+    state->setMinimapData(QVariantMap{});
+    state->setStatusIcons(QVariantList{});
+
+    state->setShopChoiceVisible(false);
+    state->setShopChoiceGeometry(0, 0, 0, 0);
+    state->setShopChoiceText(QString(), QString());
+    state->setShopChoiceButtons(QVariantList{});
+
+    state->setNotifications(QVariantList{});
+    state->setAnchors(QVariantList{});
+}
+
+QString ToQString(const std::string& value)
+{
+    return QString::fromStdString(value);
+}
+
+QString ToQString(const char* value)
+{
+    return value ? QString::fromLocal8Bit(value) : QString();
+}
+
+QString FormatCompositeStatusText(int primary, int secondary)
+{
+    if (secondary > 0) {
+        return QStringLiteral("%1 + %2").arg(primary).arg(secondary);
+    }
+    return QString::number(primary);
+}
+
+QString FormatMatkStatusText(int minValue, int maxValue)
+{
+    if (minValue == maxValue) {
+        return QString::number(maxValue);
+    }
+    return QStringLiteral("%1~%2").arg(minValue).arg(maxValue);
+}
+
+QString FormatBaseStatusText(int baseValue, int plusValue)
+{
+    if (plusValue > 0) {
+        return QStringLiteral("%1+%2").arg(baseValue).arg(plusValue);
+    }
+    return QString::number(baseValue);
+}
+
+QString FormatBasicGaugeText(const char* label, int current, int maximum)
+{
+    return QStringLiteral("%1      %2  /  %3")
+        .arg(ToQString(label))
+        .arg(current)
+        .arg(maximum);
+}
+
+QString FormatBasicLevelText(const char* label, int value)
+{
+    return QStringLiteral("%1 %2")
+        .arg(ToQString(label))
+        .arg(value);
+}
+
+QString FormatBasicInfoMiniHeaderText(int level, const QString& jobName, int expPercent)
+{
+    return QStringLiteral("Lv. %1 / %2 / Exp. %3 %")
+        .arg(level)
+        .arg(jobName)
+        .arg(expPercent);
+}
+
+QString FormatBasicInfoMiniStatusText(int hp, int maxHp, int sp, int maxSp, int money)
+{
+    return QStringLiteral("HP %1 / %2  |  SP %3 / %4  |  %5 Z")
+        .arg(hp)
+        .arg(maxHp)
+        .arg(sp)
+        .arg(maxSp)
+        .arg(money);
+}
+
+QString FormatCharacterSlotLevelText(int level)
+{
+    return QStringLiteral("Lv. %1").arg(level);
+}
+
+QVariantMap BuildDebugOverlayData(const QString& backendName,
+    const QString& modeName,
+    const QString& renderPath,
+    const QString& loginStatus,
+    const QString& chatPreview,
+    const QString& lastInput)
+{
+    QVariantMap data;
+    data.insert(QStringLiteral("title"), QStringLiteral("Qt 6 GPU UI"));
+    data.insert(QStringLiteral("backendLine"), QStringLiteral("Backend: %1").arg(backendName));
+    data.insert(QStringLiteral("modeLine"), QStringLiteral("Mode: %1").arg(modeName));
+    data.insert(QStringLiteral("renderPathLine"), QStringLiteral("Render path: %1").arg(renderPath));
+    data.insert(QStringLiteral("loginStatusLine"), QStringLiteral("Login status: %1").arg(loginStatus));
+    data.insert(QStringLiteral("chatPreviewText"), QStringLiteral("Recent chat:\n%1").arg(chatPreview));
+    data.insert(QStringLiteral("inputLine"), QStringLiteral("Input: %1").arg(lastInput));
+    return data;
+}
+
+bool IsNpcColorCodeAt(const std::string& value, size_t index)
+{
+    if (index + 7 > value.size() || value[index] != '^') {
+        return false;
+    }
+    for (size_t offset = 1; offset <= 6; ++offset) {
+        const char ch = value[index + offset];
+        const bool hex = (ch >= '0' && ch <= '9')
+            || (ch >= 'A' && ch <= 'F')
+            || (ch >= 'a' && ch <= 'f');
+        if (!hex) {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString NpcColorCodesToHtml(const std::string& value)
+{
+    QString html = QStringLiteral("<span style=\"color:#000000;\">");
+    size_t segmentStart = 0;
+    for (size_t index = 0; index < value.size();) {
+        if (IsNpcColorCodeAt(value, index)) {
+            if (index > segmentStart) {
+                html += ToQString(value.substr(segmentStart, index - segmentStart)).toHtmlEscaped();
+            }
+            html += QStringLiteral("</span><span style=\"color:#%1;\">")
+                .arg(QString::fromLatin1(value.data() + index + 1, 6).toLower());
+            index += 7;
+            segmentStart = index;
+            continue;
+        }
+        if (value[index] == '\r') {
+            if (index > segmentStart) {
+                html += ToQString(value.substr(segmentStart, index - segmentStart)).toHtmlEscaped();
+            }
+            if (index + 1 < value.size() && value[index + 1] == '\n') {
+                ++index;
+            }
+            html += QStringLiteral("<br/>");
+            ++index;
+            segmentStart = index;
+            continue;
+        }
+        if (value[index] == '\n') {
+            if (index > segmentStart) {
+                html += ToQString(value.substr(segmentStart, index - segmentStart)).toHtmlEscaped();
+            }
+            html += QStringLiteral("<br/>");
+            ++index;
+            segmentStart = index;
+            continue;
+        }
+        ++index;
+    }
+    if (segmentStart < value.size()) {
+        html += ToQString(value.substr(segmentStart)).toHtmlEscaped();
+    }
+    html += QStringLiteral("</span>");
+    return html;
+}
+
+QString ResolveShortcutSlotLabel(const SHORTCUT_SLOT* slot)
+{
+    if (!slot || slot->id == 0) {
+        return QString();
+    }
+
+    if (slot->isSkill != 0) {
+        if (const PLAYER_SKILL_INFO* skill = g_session.GetSkillItemBySkillId(static_cast<int>(slot->id))) {
+            if (!skill->skillName.empty()) {
+                return ToQString(skill->skillName);
+            }
+            if (!skill->skillIdName.empty()) {
+                return ToQString(skill->skillIdName);
+            }
+        }
+        return QStringLiteral("Skill %1").arg(slot->id);
+    }
+
+    if (const ITEM_INFO* item = g_session.GetInventoryItemByItemId(slot->id)) {
+        const std::string displayName = shopui::GetItemDisplayName(*item);
+        if (!displayName.empty()) {
+            return ToQString(displayName);
+        }
+    }
+
+    return QStringLiteral("Item %1").arg(slot->id);
+}
+
+QString ResolveStatusIconLabel(int statusType, int skillId)
+{
+    if (skillId > 0) {
+        if (const SkillMetadata* metadata = g_skillMgr.GetSkillMetadata(skillId)) {
+            if (!metadata->displayName.empty()) {
+                return ToQString(metadata->displayName);
+            }
+            if (!metadata->skillIdName.empty()) {
+                return ToQString(metadata->skillIdName);
+            }
+        }
+    }
+
+    if (const qtui::StatusIconCatalogEntry* entry = qtui::FindStatusIconCatalogEntry(statusType)) {
+        return ToQString(entry->fallbackLabel);
+    }
+
+    return QStringLiteral("Status %1").arg(statusType);
+}
+
+QString FormatStatusDuration(u32 remainingMs)
+{
+    const u32 totalSeconds = (remainingMs + 999u) / 1000u;
+    const u32 seconds = totalSeconds % 60u;
+    const u32 totalMinutes = totalSeconds / 60u;
+    const u32 hours = totalMinutes / 60u;
+    const u32 minutes = totalMinutes % 60u;
+
+    if (hours > 0u) {
+        return QStringLiteral("%1:%2:%3")
+            .arg(static_cast<int>(hours))
+            .arg(static_cast<int>(minutes), 2, 10, QChar('0'))
+            .arg(static_cast<int>(seconds), 2, 10, QChar('0'));
+    }
+
+    return QStringLiteral("%1:%2")
+        .arg(static_cast<int>(totalMinutes))
+        .arg(static_cast<int>(seconds), 2, 10, QChar('0'));
+}
+
+QString BuildStatusIconTooltipText(const QVariantMap& icon)
+{
+    const QString name = icon.value(QStringLiteral("name")).toString();
+    if (icon.value(QStringLiteral("timed")).toBool()) {
+        const int remainingMs = (std::max)(0, icon.value(QStringLiteral("remainingMs")).toInt());
+        return QStringLiteral("%1\n%2 remaining").arg(name, FormatStatusDuration(static_cast<u32>(remainingMs)));
+    }
+    return QStringLiteral("%1\nActive").arg(name);
+}
+
+int FindHoveredStatusIconIndex(const QtUiState* state, int mouseX, int mouseY)
+{
+    if (!state || !state->minimapVisible()) {
+        return -1;
+    }
+
+    const QVariantList& icons = state->statusIcons();
+    if (icons.isEmpty()) {
+        return -1;
+    }
+
+    const int stackX = state->minimapX() + (std::max)(0, state->minimapWidth() - kQtStatusIconSize);
+    const int stackY = state->minimapY() + state->minimapHeight() + kQtStatusIconTopMargin;
+    const int stride = kQtStatusIconSize + kQtStatusIconSpacing;
+    const int stackHeight = (icons.size() * kQtStatusIconSize) + ((icons.size() - 1) * kQtStatusIconSpacing);
+    if (mouseX < stackX || mouseX >= stackX + kQtStatusIconSize || mouseY < stackY || mouseY >= stackY + stackHeight) {
+        return -1;
+    }
+
+    const int localY = mouseY - stackY;
+    const int index = localY / stride;
+    if (index < 0 || index >= icons.size()) {
+        return -1;
+    }
+    if ((localY % stride) >= kQtStatusIconSize) {
+        return -1;
+    }
+    return index;
+}
+
+bool TryAppendHoveredStatusIconAnchor(const QtUiState* state, int mouseX, int mouseY, QVariantList* anchors)
+{
+    if (!state || !anchors) {
+        return false;
+    }
+
+    const int hoveredIndex = FindHoveredStatusIconIndex(state, mouseX, mouseY);
+    if (hoveredIndex < 0) {
+        return false;
+    }
+
+    const QVariantList& icons = state->statusIcons();
+    if (hoveredIndex >= icons.size()) {
+        return false;
+    }
+
+    const QVariantMap icon = icons[hoveredIndex].toMap();
+    const int logicalCenterX = state->minimapX() + (std::max)(0, state->minimapWidth() - kQtStatusIconSize) + (kQtStatusIconSize / 2);
+    const int logicalBottomY = state->minimapY()
+        + state->minimapHeight()
+        + kQtStatusIconTopMargin
+        + (hoveredIndex * (kQtStatusIconSize + kQtStatusIconSpacing))
+        - 8;
+
+    QVariantMap anchor;
+    anchor.insert(QStringLiteral("text"), BuildStatusIconTooltipText(icon));
+    anchor.insert(QStringLiteral("centerX"), UiScaleLogicalToRawCoordinate(logicalCenterX));
+    anchor.insert(QStringLiteral("bottomY"), UiScaleLogicalToRawCoordinate(logicalBottomY));
+    anchor.insert(QStringLiteral("background"), QStringLiteral("#ea1d232c"));
+    anchor.insert(QStringLiteral("foreground"), QStringLiteral("#f3f4f6"));
+    anchor.insert(QStringLiteral("showBubble"), true);
+    anchor.insert(QStringLiteral("fontPixelSize"), 11);
+    anchor.insert(QStringLiteral("bold"), false);
+    anchor.insert(QStringLiteral("wrap"), true);
+    anchor.insert(QStringLiteral("maxTextWidth"), 180);
+    anchor.insert(QStringLiteral("paddingX"), 16);
+    anchor.insert(QStringLiteral("paddingY"), 10);
+    anchor.insert(QStringLiteral("radius"), 5);
+    anchor.insert(QStringLiteral("borderColor"), QStringLiteral("#9ea9b8"));
+    anchor.insert(QStringLiteral("z"), 2100);
+    anchors->push_back(anchor);
+    return true;
+}
+
+QString BuildStatusIconShortLabel(const QString& label)
+{
+    const QString simplified = label.simplified();
+    if (simplified.isEmpty()) {
+        return QStringLiteral("?");
+    }
+
+    const QStringList parts = simplified.split(QChar(' '), Qt::SkipEmptyParts);
+    QString shortLabel;
+    for (const QString& part : parts) {
+        if (part.isEmpty()) {
+            continue;
+        }
+        shortLabel += part.left(1).toUpper();
+        if (shortLabel.size() >= 2) {
+            break;
+        }
+    }
+
+    if (shortLabel.isEmpty()) {
+        shortLabel = simplified.left(2).toUpper();
+    }
+
+    return shortLabel.left(3);
+}
+
+QString ToCssColor(u8 red, u8 green, u8 blue)
+{
+    return QStringLiteral("#%1%2%3")
+        .arg(static_cast<int>(red), 2, 16, QChar('0'))
+        .arg(static_cast<int>(green), 2, 16, QChar('0'))
+        .arg(static_cast<int>(blue), 2, 16, QChar('0'));
+}
+
+QString BackendToQString(RenderBackendType backend)
+{
+    return QString::fromLatin1(GetRenderBackendName(backend));
+}
+
+QString BuildRenderPathText(RenderBackendType nativeOverlayBackend)
+{
+    if (nativeOverlayBackend != RenderBackendType::LegacyDirect3D7) {
+        return QStringLiteral("Native GPU Qt overlay on %1").arg(BackendToQString(nativeOverlayBackend));
+    }
+    return QStringLiteral("CPU bridge fallback");
+}
+
+QString BuildArchitectureNote(RenderBackendType nativeOverlayBackend)
+{
+    QtUiRenderTargetInfo targetInfo{};
+    const bool nativeTargetAvailable = GetRenderDevice().GetQtUiRenderTargetInfo(&targetInfo);
+    const QString backendName = BackendToQString(targetInfo.backend);
+
+    if (nativeTargetAvailable && targetInfo.available) {
+        if (nativeOverlayBackend != RenderBackendType::LegacyDirect3D7) {
+            return QStringLiteral("Qt Quick is rendering into a native %1 overlay texture and the renderer composites that texture in the GPU overlay pass.")
+                .arg(BackendToQString(nativeOverlayBackend));
+        }
+        if (targetInfo.backend == RenderBackendType::Vulkan) {
+            return QStringLiteral("Renderer-native Vulkan target is available for Qt UI (%1x%2). Legacy paths can now be retired feature-by-feature.")
+                .arg(targetInfo.width)
+                .arg(targetInfo.height);
+        }
+
+        return QStringLiteral("Renderer-owned Qt target descriptor is available on %1 (%2x%3). Remaining legacy paths should move onto the native GPU overlay.")
+            .arg(backendName)
+            .arg(targetInfo.width)
+            .arg(targetInfo.height);
+    }
+
+    return QStringLiteral("Qt runtime is active, but %1 still falls back to the CPU bridge until a native target is available.")
+        .arg(backendName);
+}
+
+QString BuildChatPreviewText()
+{
+    const std::vector<UIChatEvent> preview = g_windowMgr.GetChatPreviewEvents(3);
+    if (preview.empty()) {
+        return QStringLiteral("No recent chat events.");
+    }
+
+    QStringList lines;
+    for (const UIChatEvent& event : preview) {
+        lines.push_back(ToQString(event.text));
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
+QString BuildMenuModeText()
+{
+    if (g_windowMgr.m_loadingWnd && g_windowMgr.m_loadingWnd->m_show != 0) {
+        return QStringLiteral("Loading");
+    }
+    if (g_windowMgr.m_waitWnd && g_windowMgr.m_waitWnd->m_show != 0) {
+        return QStringLiteral("Please Wait");
+    }
+    if (g_windowMgr.m_makeCharWnd && g_windowMgr.m_makeCharWnd->m_show != 0) {
+        return QStringLiteral("Character Create");
+    }
+    if (g_windowMgr.m_selectCharWnd && g_windowMgr.m_selectCharWnd->m_show != 0) {
+        return QStringLiteral("Character Select");
+    }
+    if (g_windowMgr.m_selectServerWnd && g_windowMgr.m_selectServerWnd->m_show != 0) {
+        return QStringLiteral("Server Select");
+    }
+    if (g_windowMgr.m_loginWnd && g_windowMgr.m_loginWnd->m_show != 0) {
+        return QStringLiteral("Login");
+    }
+    return QStringLiteral("Menu");
+}
+
+void PopulateLoadingState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UILoadingWnd* const loadingWnd = g_windowMgr.m_loadingWnd;
+    const UIWaitWnd* const waitWnd = g_windowMgr.m_waitWnd;
+    const bool loadingVisible = (loadingWnd && loadingWnd->m_show != 0)
+        || (waitWnd && waitWnd->m_show != 0);
+    state->setLoadingVisible(loadingVisible);
+    if (loadingWnd && loadingWnd->m_show != 0) {
+        state->setLoadingMessage(ToQString(loadingWnd->GetMessage().c_str()));
+        state->setLoadingProgress(static_cast<double>(loadingWnd->GetProgress()));
+    } else if (waitWnd && waitWnd->m_show != 0) {
+        state->setLoadingMessage(ToQString(waitWnd->m_waitMsg.c_str()));
+        state->setLoadingProgress(0.0);
+    } else {
+        state->setLoadingMessage(QString());
+        state->setLoadingProgress(0.0);
+    }
+}
+
+void PopulateServerSelectState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISelectServerWnd* const serverWnd = g_windowMgr.m_selectServerWnd;
+    const bool visible = serverWnd && serverWnd->m_show != 0 && GetClientInfoConnectionCount() > 1;
+    state->setServerSelectVisible(visible);
+    if (!visible) {
+        state->setServerPanelGeometry(0, 0, 0, 0);
+        state->setServerSelectedIndex(-1);
+        state->setServerHoverIndex(-1);
+        state->setServerPanelData(QVariantMap{});
+        state->setServerEntries(QVariantList{});
+        state->setServerEntryText(QStringList{}, QStringList{});
+        return;
+    }
+
+    if (g_windowMgr.m_loginWnd && g_windowMgr.m_loginWnd->m_show != 0) {
+        g_windowMgr.m_loginWnd->EnsureQtLayout();
+    }
+    g_windowMgr.m_selectServerWnd->SetShow(1);
+
+    state->setServerPanelGeometry(serverWnd->m_x, serverWnd->m_y, serverWnd->m_w, serverWnd->m_h);
+    state->setServerSelectedIndex(GetSelectedClientInfoIndex());
+    state->setServerHoverIndex(serverWnd->GetHoverIndex());
+    QVariantMap serverPanelData;
+    serverPanelData.insert(QStringLiteral("title"), QStringLiteral("Select Server"));
+    state->setServerPanelData(serverPanelData);
+
+    QVariantList entries;
+    QStringList labels;
+    QStringList details;
+    const std::vector<ClientInfoConnection>& connections = GetClientInfoConnections();
+    entries.reserve(static_cast<qsizetype>(connections.size()));
+    labels.reserve(static_cast<qsizetype>(connections.size()));
+    details.reserve(static_cast<qsizetype>(connections.size()));
+    for (const ClientInfoConnection& info : connections) {
+        const QString label = ToQString((!info.display.empty() ? info.display : info.address).c_str());
+        const QString detail = ToQString((!info.desc.empty() ? info.desc : info.port).c_str());
+        QVariantMap entry;
+        entry.insert(QStringLiteral("label"), label);
+        entry.insert(QStringLiteral("detail"), detail);
+        entries.push_back(entry);
+        labels.push_back(label);
+        details.push_back(detail);
+    }
+    state->setServerEntries(entries);
+    state->setServerEntryText(labels, details);
+}
+
+void PopulateLoginPanelState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UILoginWnd* const loginWnd = g_windowMgr.m_loginWnd;
+    const bool visible = loginWnd && loginWnd->m_show != 0;
+    state->setLoginPanelVisible(visible);
+    if (!visible) {
+        state->setLoginPanelGeometry(0, 0, 0, 0);
+        state->setLoginPanelData(QString(), QString(), false, false);
+        state->setLoginPanelLabels(QVariantMap{});
+        state->setLoginButtons(QVariantList{});
+        return;
+    }
+
+    g_windowMgr.m_loginWnd->EnsureQtLayout();
+    g_windowMgr.m_loginWnd->RefreshRememberedUserIdStorage();
+    state->setLoginPanelGeometry(loginWnd->m_x, loginWnd->m_y, loginWnd->m_w, loginWnd->m_h);
+    const QString userId = ToQString(loginWnd->GetLoginText());
+    const QString passwordMask(loginWnd->GetPasswordLength(), QLatin1Char('*'));
+    state->setLoginPanelData(
+        userId,
+        passwordMask,
+        loginWnd->IsSaveAccountChecked(),
+        loginWnd->IsPasswordFocused());
+    QVariantMap loginPanelLabels;
+    loginPanelLabels.insert(QStringLiteral("title"), QStringLiteral("Login"));
+    loginPanelLabels.insert(QStringLiteral("saveLabel"), QStringLiteral("Save"));
+    state->setLoginPanelLabels(loginPanelLabels);
+
+    QVariantList buttons;
+    const int buttonCount = loginWnd->GetQtButtonCount();
+    buttons.reserve(buttonCount);
+    for (int index = 0; index < buttonCount; ++index) {
+        UILoginWnd::QtButtonDisplay buttonDisplay{};
+        if (!loginWnd->GetQtButtonDisplayForQt(index, &buttonDisplay)) {
+            continue;
+        }
+
+        QVariantMap button;
+        button.insert(QStringLiteral("id"), buttonDisplay.id);
+        button.insert(QStringLiteral("x"), buttonDisplay.x);
+        button.insert(QStringLiteral("y"), buttonDisplay.y);
+        button.insert(QStringLiteral("width"), buttonDisplay.width);
+        button.insert(QStringLiteral("height"), buttonDisplay.height);
+        button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+        buttons.push_back(button);
+    }
+    state->setLoginButtons(buttons);
+}
+
+void PopulateCharSelectState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISelectCharWnd* const selectCharWnd = g_windowMgr.m_selectCharWnd;
+    const bool visible = selectCharWnd && selectCharWnd->m_show != 0;
+    state->setCharSelectVisible(visible);
+    if (!visible) {
+        state->setCharSelectPanelGeometry(0, 0, 0, 0);
+        state->setCharSelectPageState(0, 0);
+        state->setCharSelectSlots(QVariantList{});
+        state->setCharSelectSelectedDetails(QVariantMap{});
+        state->setCharSelectPageButtons(QVariantList{});
+        state->setCharSelectActionButtons(QVariantList{});
+        return;
+    }
+
+    g_windowMgr.m_selectCharWnd->EnsureQtLayout();
+    state->setCharSelectPanelGeometry(
+        selectCharWnd->m_x,
+        selectCharWnd->m_y,
+        selectCharWnd->m_w,
+        selectCharWnd->m_h);
+    state->setCharSelectPageState(
+        selectCharWnd->GetCurrentPage(),
+        selectCharWnd->GetCurrentPageCount());
+
+    QVariantList slotList;
+    QStringList imageRevisionParts;
+    imageRevisionParts.reserve(4);
+    imageRevisionParts.push_back(QStringLiteral("page=%1").arg(selectCharWnd->GetCurrentPage()));
+    imageRevisionParts.push_back(QStringLiteral("pages=%1").arg(selectCharWnd->GetCurrentPageCount()));
+    imageRevisionParts.push_back(QStringLiteral("selected=%1").arg(selectCharWnd->GetSelectedSlotNumber()));
+    for (int visibleIndex = 0; visibleIndex < 3; ++visibleIndex) {
+        UISelectCharWnd::VisibleSlotDisplay slotInfo{};
+        if (!selectCharWnd->GetVisibleSlotDisplay(visibleIndex, &slotInfo)) {
+            continue;
+        }
+
+        imageRevisionParts.push_back(QStringLiteral("slot=%1:%2:%3:%4:%5")
+            .arg(slotInfo.slotNumber)
+            .arg(slotInfo.occupied ? 1 : 0)
+            .arg(slotInfo.selected ? 1 : 0)
+            .arg(ToQString(slotInfo.name))
+            .arg(slotInfo.level));
+
+        QVariantMap slot;
+        slot.insert(QStringLiteral("occupied"), slotInfo.occupied);
+        slot.insert(QStringLiteral("selected"), slotInfo.selected);
+        slot.insert(QStringLiteral("slotNumber"), slotInfo.slotNumber);
+        slot.insert(QStringLiteral("x"), slotInfo.x);
+        slot.insert(QStringLiteral("y"), slotInfo.y);
+        slot.insert(QStringLiteral("width"), slotInfo.width);
+        slot.insert(QStringLiteral("height"), slotInfo.height);
+        slot.insert(QStringLiteral("name"), ToQString(slotInfo.name));
+        slot.insert(QStringLiteral("job"), ToQString(slotInfo.job));
+        slot.insert(QStringLiteral("level"), slotInfo.level);
+        slot.insert(QStringLiteral("displayName"),
+            slotInfo.occupied ? ToQString(slotInfo.name) : QStringLiteral("Empty Slot"));
+        slot.insert(QStringLiteral("levelText"),
+            slotInfo.occupied ? FormatCharacterSlotLevelText(slotInfo.level) : QString());
+        slotList.push_back(slot);
+    }
+    state->setCharSelectSlots(slotList);
+
+    UISelectCharWnd::SelectedCharacterDisplay selected{};
+    QVariantMap details;
+    if (selectCharWnd->GetSelectedCharacterDisplay(&selected) && selected.valid) {
+        details.insert(QStringLiteral("name"), ToQString(selected.name));
+        details.insert(QStringLiteral("job"), ToQString(selected.job));
+        details.insert(QStringLiteral("level"), selected.level);
+        details.insert(QStringLiteral("exp"), static_cast<qulonglong>(selected.exp));
+        details.insert(QStringLiteral("hp"), selected.hp);
+        details.insert(QStringLiteral("sp"), selected.sp);
+        details.insert(QStringLiteral("str"), selected.str);
+        details.insert(QStringLiteral("agi"), selected.agi);
+        details.insert(QStringLiteral("vit"), selected.vit);
+        details.insert(QStringLiteral("int"), selected.intStat);
+        details.insert(QStringLiteral("dex"), selected.dex);
+        details.insert(QStringLiteral("luk"), selected.luk);
+
+        QVariantList fields;
+        fields.reserve(selectCharWnd->GetQtSelectedDetailFieldCount());
+        for (int index = 0; index < selectCharWnd->GetQtSelectedDetailFieldCount(); ++index) {
+            UISelectCharWnd::QtDetailFieldDisplay display{};
+            if (!selectCharWnd->GetQtSelectedDetailFieldDisplayForQt(index, &display)) {
+                continue;
+            }
+
+            QVariantMap field;
+            field.insert(QStringLiteral("x"), display.x);
+            field.insert(QStringLiteral("y"), display.y);
+            field.insert(QStringLiteral("width"), display.width);
+            field.insert(QStringLiteral("height"), display.height);
+            field.insert(QStringLiteral("text"), ToQString(display.text));
+            fields.push_back(field);
+        }
+        details.insert(QStringLiteral("fields"), fields);
+    }
+    details.insert(QStringLiteral("imageRevision"), imageRevisionParts.join(QLatin1Char('|')));
+    state->setCharSelectSelectedDetails(details);
+
+    QVariantList pageButtons;
+    pageButtons.reserve(selectCharWnd->GetQtPageButtonCount());
+    for (int index = 0; index < selectCharWnd->GetQtPageButtonCount(); ++index) {
+        UISelectCharWnd::QtButtonDisplay display{};
+        if (!selectCharWnd->GetQtPageButtonDisplayForQt(index, &display)) {
+            continue;
+        }
+
+        QVariantMap button;
+        button.insert(QStringLiteral("id"), display.id);
+        button.insert(QStringLiteral("x"), display.x);
+        button.insert(QStringLiteral("y"), display.y);
+        button.insert(QStringLiteral("width"), display.width);
+        button.insert(QStringLiteral("height"), display.height);
+        button.insert(QStringLiteral("label"), ToQString(display.label));
+        button.insert(QStringLiteral("visible"), display.visible);
+        pageButtons.push_back(button);
+    }
+    state->setCharSelectPageButtons(pageButtons);
+
+    QVariantList actionButtons;
+    actionButtons.reserve(selectCharWnd->GetQtActionButtonCount());
+    for (int index = 0; index < selectCharWnd->GetQtActionButtonCount(); ++index) {
+        UISelectCharWnd::QtButtonDisplay display{};
+        if (!selectCharWnd->GetQtActionButtonDisplayForQt(index, &display)) {
+            continue;
+        }
+
+        QVariantMap button;
+        button.insert(QStringLiteral("id"), display.id);
+        button.insert(QStringLiteral("x"), display.x);
+        button.insert(QStringLiteral("y"), display.y);
+        button.insert(QStringLiteral("width"), display.width);
+        button.insert(QStringLiteral("height"), display.height);
+        button.insert(QStringLiteral("label"), ToQString(display.label));
+        button.insert(QStringLiteral("visible"), display.visible);
+        actionButtons.push_back(button);
+    }
+    state->setCharSelectActionButtons(actionButtons);
+}
+
+void PopulateMakeCharState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIMakeCharWnd* const makeCharWnd = g_windowMgr.m_makeCharWnd;
+    const bool visible = makeCharWnd && makeCharWnd->m_show != 0;
+    state->setMakeCharVisible(visible);
+    if (!visible) {
+        state->setMakeCharPanelGeometry(0, 0, 0, 0);
+        state->setMakeCharData(QString(), false, QVariantList{}, 0, 0);
+        state->setMakeCharPanelData(QVariantMap{});
+        state->setMakeCharButtons(QVariantList{});
+        state->setMakeCharStatFields(QVariantList{});
+        return;
+    }
+
+    g_windowMgr.m_makeCharWnd->EnsureQtLayout();
+    state->setMakeCharPanelGeometry(
+        makeCharWnd->m_x,
+        makeCharWnd->m_y,
+        makeCharWnd->m_w,
+        makeCharWnd->m_h);
+
+    UIMakeCharWnd::MakeCharDisplay display{};
+    QVariantList stats;
+    if (makeCharWnd->GetMakeCharDisplay(&display)) {
+        for (int i = 0; i < 6; ++i) {
+            stats.push_back(display.stats[i]);
+        }
+        state->setMakeCharData(
+            ToQString(display.name),
+            display.nameFocused,
+            stats,
+            display.hairIndex,
+            display.hairColor);
+        QVariantMap makeCharPanelData;
+        makeCharPanelData.insert(QStringLiteral("imageRevision"), makeCharWnd->m_stateCnt);
+        makeCharPanelData.insert(QStringLiteral("previewTitle"), QStringLiteral("Preview"));
+        makeCharPanelData.insert(QStringLiteral("hairText"), QStringLiteral("Hair %1").arg(display.hairIndex));
+        makeCharPanelData.insert(QStringLiteral("colorText"), QStringLiteral("Color %1").arg(display.hairColor));
+        state->setMakeCharPanelData(makeCharPanelData);
+
+        QVariantList statFields;
+        statFields.reserve(makeCharWnd->GetQtStatFieldCount());
+        for (int index = 0; index < makeCharWnd->GetQtStatFieldCount(); ++index) {
+            UIMakeCharWnd::QtStatFieldDisplay fieldDisplay{};
+            if (!makeCharWnd->GetQtStatFieldDisplayForQt(index, &fieldDisplay)) {
+                continue;
+            }
+
+            QVariantMap field;
+            field.insert(QStringLiteral("x"), fieldDisplay.x);
+            field.insert(QStringLiteral("y"), fieldDisplay.y);
+            field.insert(QStringLiteral("width"), fieldDisplay.width);
+            field.insert(QStringLiteral("height"), fieldDisplay.height);
+            field.insert(QStringLiteral("label"), ToQString(fieldDisplay.label));
+            field.insert(QStringLiteral("value"), fieldDisplay.value);
+            statFields.push_back(field);
+        }
+        state->setMakeCharStatFields(statFields);
+
+        QVariantList buttons;
+        buttons.reserve(makeCharWnd->GetQtButtonCount());
+        for (int index = 0; index < makeCharWnd->GetQtButtonCount(); ++index) {
+            UIMakeCharWnd::QtButtonDisplay buttonDisplay{};
+            if (!makeCharWnd->GetQtButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("pressed"), buttonDisplay.pressed);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            buttons.push_back(button);
+        }
+        state->setMakeCharButtons(buttons);
+        return;
+    }
+
+    state->setMakeCharData(QString(), false, QVariantList{}, 0, 0);
+    state->setMakeCharPanelData(QVariantMap{});
+    state->setMakeCharButtons(QVariantList{});
+    state->setMakeCharStatFields(QVariantList{});
+}
+
+void PopulateNotificationState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    if (IsGameplayUiSuppressed(state)) {
+        state->setNotifications(QVariantList{});
+        return;
+    }
+
+    QVariantList notifications;
+    const UINotifyLevelUpWnd* notices[] = {
+        g_windowMgr.m_notifyLevelUpWnd,
+        g_windowMgr.m_notifyJobLevelUpWnd,
+    };
+
+    for (const UINotifyLevelUpWnd* notice : notices) {
+        if (!notice || notice->m_show == 0) {
+            continue;
+        }
+
+        QVariantMap entry;
+        entry.insert(QStringLiteral("x"), notice->m_x);
+        entry.insert(QStringLiteral("y"), notice->m_y);
+        entry.insert(QStringLiteral("width"), notice->m_w);
+        entry.insert(QStringLiteral("height"), notice->m_h);
+        entry.insert(QStringLiteral("title"),
+            notice->IsJobLevelNotice() ? QStringLiteral("Job Level Up") : QStringLiteral("Level Up"));
+        entry.insert(QStringLiteral("accent"),
+            notice->IsJobLevelNotice() ? QStringLiteral("#4f8bd6") : QStringLiteral("#7ca93d"));
+        notifications.push_back(entry);
+    }
+
+    state->setNotifications(notifications);
+}
+
+void PopulateShopChoiceState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISelectCartWnd* const cartWnd = g_windowMgr.m_selectCartWnd;
+    const bool cartVisible = IsGameplayWindowVisible(state, cartWnd);
+    if (cartVisible) {
+        state->setShopChoiceVisible(true);
+        state->setShopChoiceGeometry(cartWnd->m_x, cartWnd->m_y, cartWnd->m_w, cartWnd->m_h);
+        state->setShopChoiceText(QStringLiteral("Select Cart"), QStringLiteral("Choose the pushcart style to equip."));
+
+        QVariantList buttons;
+        const int optionCount = cartWnd->GetVisibleOptionCount();
+        for (int index = 0; index < optionCount; ++index) {
+            const RECT rect = cartWnd->GetOptionRectForRender(index);
+            QVariantMap button;
+            button.insert(QStringLiteral("label"), QStringLiteral("Cart %1").arg(index + 1));
+            button.insert(QStringLiteral("x"), QVariant::fromValue(static_cast<int>(rect.left)));
+            button.insert(QStringLiteral("y"), QVariant::fromValue(static_cast<int>(rect.top)));
+            button.insert(QStringLiteral("width"), QVariant::fromValue(static_cast<int>(rect.right - rect.left)));
+            button.insert(QStringLiteral("height"), QVariant::fromValue(static_cast<int>(rect.bottom - rect.top)));
+            button.insert(QStringLiteral("hot"), cartWnd->GetHoverIndex() == index);
+            button.insert(QStringLiteral("pressed"), cartWnd->GetPressedIndex() == index);
+            buttons.push_back(button);
+        }
+        state->setShopChoiceButtons(buttons);
+        return;
+    }
+
+    const UIChooseSellBuyWnd* const shopWnd = g_windowMgr.m_chooseSellBuyWnd;
+    const bool visible = IsGameplayWindowVisible(state, shopWnd);
+    state->setShopChoiceVisible(visible);
+    if (!visible) {
+        state->setShopChoiceGeometry(0, 0, 0, 0);
+        state->setShopChoiceText(QString(), QString());
+        state->setShopChoiceButtons(QVariantList{});
+        return;
+    }
+
+    state->setShopChoiceGeometry(shopWnd->m_x, shopWnd->m_y, shopWnd->m_w, shopWnd->m_h);
+    state->setShopChoiceText(QStringLiteral("Shop"), QStringLiteral("Choose a transaction type."));
+
+    QVariantList buttons;
+    struct ButtonSpec {
+        UIChooseSellBuyWnd::ButtonId id;
+        const char* label;
+        int offsetX;
+        int offsetY;
+        int width;
+        int height;
+    };
+    const ButtonSpec specs[] = {
+        { UIChooseSellBuyWnd::ButtonBuy, "Buy", 14, 46, 76, 22 },
+        { UIChooseSellBuyWnd::ButtonSell, "Sell", 90, 46, 76, 22 },
+        { UIChooseSellBuyWnd::ButtonCancel, "Cancel", 52, 74, 76, 22 },
+    };
+    for (const ButtonSpec& spec : specs) {
+        QVariantMap button;
+        button.insert(QStringLiteral("label"), ToQString(spec.label));
+        button.insert(QStringLiteral("x"), shopWnd->m_x + spec.offsetX);
+        button.insert(QStringLiteral("y"), shopWnd->m_y + spec.offsetY);
+        button.insert(QStringLiteral("width"), spec.width);
+        button.insert(QStringLiteral("height"), spec.height);
+        button.insert(QStringLiteral("hot"), shopWnd->GetHoverButton() == spec.id);
+        button.insert(QStringLiteral("pressed"), shopWnd->GetPressedButton() == spec.id);
+        buttons.push_back(button);
+    }
+    state->setShopChoiceButtons(buttons);
+}
+
+void PopulateNpcMenuState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIPlayerContextMenuWnd* const playerMenuWnd = g_windowMgr.m_playerContextMenuWnd;
+    const bool playerMenuVisible = IsGameplayWindowVisible(state, playerMenuWnd);
+    if (playerMenuVisible) {
+        state->setNpcMenuVisible(true);
+        state->setNpcMenuGeometry(playerMenuWnd->m_x, playerMenuWnd->m_y, playerMenuWnd->m_w, playerMenuWnd->m_h);
+        state->setNpcMenuSelection(playerMenuWnd->GetSelectedIndex());
+        state->setNpcMenuHoverIndex(playerMenuWnd->GetHoverIndex());
+        state->setNpcMenuButtons(false, false);
+
+        QVariantList options;
+        const std::vector<std::string>& rawOptions = playerMenuWnd->GetOptions();
+        options.reserve(static_cast<qsizetype>(rawOptions.size()));
+        for (const std::string& option : rawOptions) {
+            options.push_back(NpcColorCodesToHtml(option));
+        }
+        state->setNpcMenuOptions(options);
+        state->setNpcMenuButtonsData(QVariantList{});
+        return;
+    }
+
+    const UINpcMenuWnd* const menuWnd = g_windowMgr.m_npcMenuWnd;
+    const bool visible = IsGameplayWindowVisible(state, menuWnd);
+    state->setNpcMenuVisible(visible);
+    if (!visible) {
+        state->setNpcMenuGeometry(0, 0, 0, 0);
+        state->setNpcMenuSelection(-1);
+        state->setNpcMenuHoverIndex(-1);
+        state->setNpcMenuButtons(false, false);
+        state->setNpcMenuOptions(QVariantList{});
+        state->setNpcMenuButtonsData(QVariantList{});
+        return;
+    }
+
+    state->setNpcMenuGeometry(menuWnd->m_x, menuWnd->m_y, menuWnd->m_w, menuWnd->m_h);
+    state->setNpcMenuSelection(menuWnd->GetSelectedIndex());
+    state->setNpcMenuHoverIndex(menuWnd->GetHoverIndex());
+    state->setNpcMenuButtons(menuWnd->IsOkPressed(), menuWnd->IsCancelPressed());
+
+    QVariantList options;
+    const std::vector<std::string>& rawOptions = menuWnd->GetOptions();
+    options.reserve(static_cast<qsizetype>(rawOptions.size()));
+    for (const std::string& option : rawOptions) {
+        options.push_back(NpcColorCodesToHtml(option));
+    }
+    state->setNpcMenuOptions(options);
+
+    QVariantList buttons;
+    RECT rect{};
+    if (menuWnd->GetOkRectForQt(&rect)) {
+        QVariantMap button;
+        button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+        button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+        button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+        button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
+        button.insert(QStringLiteral("label"), QStringLiteral("OK"));
+        button.insert(QStringLiteral("pressed"), menuWnd->IsOkPressed());
+        buttons.push_back(button);
+    }
+    if (menuWnd->GetCancelRectForQt(&rect)) {
+        QVariantMap button;
+        button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+        button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+        button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+        button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
+        button.insert(QStringLiteral("label"), QStringLiteral("Cancel"));
+        button.insert(QStringLiteral("pressed"), menuWnd->IsCancelPressed());
+        buttons.push_back(button);
+    }
+    state->setNpcMenuButtonsData(buttons);
+}
+
+void PopulateSayDialogState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISayDialogWnd* const dialogWnd = g_windowMgr.m_sayDialogWnd;
+    const bool visible = IsGameplayWindowVisible(state, dialogWnd);
+    state->setSayDialogVisible(visible);
+    if (!visible) {
+        state->setSayDialogGeometry(0, 0, 0, 0);
+        state->setSayDialogText(QString());
+        state->setSayDialogAction(false, QString(), false, false);
+        state->setSayDialogActionButton(QVariantMap{});
+        return;
+    }
+
+    state->setSayDialogGeometry(dialogWnd->m_x, dialogWnd->m_y, dialogWnd->m_w, dialogWnd->m_h);
+    state->setSayDialogText(NpcColorCodesToHtml(dialogWnd->GetDisplayText()));
+    state->setSayDialogAction(
+        dialogWnd->HasActionButton(),
+        dialogWnd->IsNextAction() ? QStringLiteral("Next") : QStringLiteral("Close"),
+        dialogWnd->IsHoveringAction(),
+        dialogWnd->IsPressingAction());
+    QVariantMap actionButton;
+    RECT actionRect{};
+    if (dialogWnd->GetActionRectForQt(&actionRect)) {
+        actionButton.insert(QStringLiteral("x"), static_cast<int>(actionRect.left));
+        actionButton.insert(QStringLiteral("y"), static_cast<int>(actionRect.top));
+        actionButton.insert(QStringLiteral("width"), static_cast<int>(actionRect.right - actionRect.left));
+        actionButton.insert(QStringLiteral("height"), static_cast<int>(actionRect.bottom - actionRect.top));
+        actionButton.insert(QStringLiteral("label"), dialogWnd->IsNextAction() ? QStringLiteral("Next") : QStringLiteral("Close"));
+        actionButton.insert(QStringLiteral("hovered"), dialogWnd->IsHoveringAction());
+        actionButton.insert(QStringLiteral("pressed"), dialogWnd->IsPressingAction());
+        actionButton.insert(QStringLiteral("visible"), dialogWnd->HasActionButton());
+    }
+    state->setSayDialogActionButton(actionButton);
+}
+
+void PopulateNpcInputState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UINpcInputWnd* const inputWnd = g_windowMgr.m_npcInputWnd;
+    const bool visible = IsGameplayWindowVisible(state, inputWnd);
+    state->setNpcInputVisible(visible);
+    if (!visible) {
+        state->setNpcInputGeometry(0, 0, 0, 0);
+        state->setNpcInputText(QString(), QString());
+        state->setNpcInputButtons(false, false);
+        state->setNpcInputButtonsData(QVariantList{});
+        return;
+    }
+
+    state->setNpcInputGeometry(inputWnd->m_x, inputWnd->m_y, inputWnd->m_w, inputWnd->m_h);
+    state->setNpcInputText(
+        ToQString(inputWnd->GetDialogLabel()),
+        ToQString(inputWnd->GetInputText()));
+    state->setNpcInputButtons(inputWnd->IsOkPressed(), inputWnd->IsCancelPressed());
+
+    QVariantList buttons;
+    RECT rect{};
+    if (inputWnd->GetOkRectForQt(&rect)) {
+        QVariantMap button;
+        button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+        button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+        button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+        button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
+        button.insert(QStringLiteral("label"), QStringLiteral("OK"));
+        button.insert(QStringLiteral("pressed"), inputWnd->IsOkPressed());
+        buttons.push_back(button);
+    }
+    if (inputWnd->GetCancelRectForQt(&rect)) {
+        QVariantMap button;
+        button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+        button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+        button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+        button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
+        button.insert(QStringLiteral("label"), QStringLiteral("Cancel"));
+        button.insert(QStringLiteral("pressed"), inputWnd->IsCancelPressed());
+        buttons.push_back(button);
+    }
+    state->setNpcInputButtonsData(buttons);
+}
+
+void PopulateChooseMenuState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIChooseWnd* const chooseWnd = g_windowMgr.m_chooseWnd;
+    const bool visible = IsGameplayWindowVisible(state, chooseWnd);
+    state->setChooseMenuVisible(visible);
+    if (!visible) {
+        state->setChooseMenuGeometry(0, 0, 0, 0);
+        state->setChooseMenuSelectedIndex(-1);
+        state->setChooseMenuPressedIndex(-1);
+        state->setChooseMenuOptions(QVariantList{});
+        return;
+    }
+
+    state->setChooseMenuGeometry(chooseWnd->m_x, chooseWnd->m_y, chooseWnd->m_w, chooseWnd->m_h);
+    state->setChooseMenuSelectedIndex(chooseWnd->GetSelectedIndex());
+    state->setChooseMenuPressedIndex(chooseWnd->GetPressedIndex());
+
+    QVariantList options;
+    const int optionCount = chooseWnd->GetEntryCount();
+    options.reserve(optionCount);
+    for (int index = 0; index < optionCount; ++index) {
+        options.push_back(ToQString(chooseWnd->GetEntryLabelForQt(index)));
+    }
+    state->setChooseMenuOptions(options);
+}
+
+void PopulateItemShopState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemShopWnd* const shopWnd = g_windowMgr.m_itemShopWnd;
+    const bool visible = IsGameplayWindowVisible(state, shopWnd);
+    state->setItemShopVisible(visible);
+    if (!visible) {
+        state->setItemShopGeometry(0, 0, 0, 0);
+        state->setItemShopTitle(QString());
+        state->setItemShopData(QVariantMap{});
+        state->setItemShopRows(QVariantList{});
+        return;
+    }
+
+    state->setItemShopGeometry(shopWnd->m_x, shopWnd->m_y, shopWnd->m_w, shopWnd->m_h);
+    const bool sellMode = g_session.m_shopMode == NpcShopMode::Sell;
+    const QString shopTitle = sellMode
+        ? QStringLiteral("Sellable Items")
+        : QStringLiteral("Shop Items");
+    state->setItemShopTitle(shopTitle);
+
+    QVariantMap shopData;
+    shopData.insert(QStringLiteral("title"), shopTitle);
+    shopData.insert(QStringLiteral("nameLabel"), QStringLiteral("Item"));
+    shopData.insert(QStringLiteral("quantityLabel"), QStringLiteral("Qty"));
+    shopData.insert(QStringLiteral("priceLabel"), QStringLiteral("Price"));
+    shopData.insert(QStringLiteral("showQuantity"), sellMode);
+    state->setItemShopData(shopData);
+
+    QVariantList rows;
+    const int startRow = shopWnd->GetViewOffset();
+    const int endRow = (std::min)(
+        static_cast<int>(g_session.m_shopRows.size()),
+        startRow + shopWnd->GetVisibleRowCountForQt());
+    rows.reserve((std::max)(0, endRow - startRow));
+    for (int rowIndex = startRow; rowIndex < endRow; ++rowIndex) {
+        const NPC_SHOP_ROW& row = g_session.m_shopRows[static_cast<size_t>(rowIndex)];
+        QVariantMap entry;
+        entry.insert(QStringLiteral("name"), ToQString(shopui::GetItemDisplayName(row.itemInfo)));
+        entry.insert(QStringLiteral("quantity"), row.availableCount);
+        entry.insert(QStringLiteral("price"), g_session.GetNpcShopUnitPrice(row));
+        entry.insert(QStringLiteral("selected"), g_session.m_shopSelectedSourceRow == rowIndex);
+        entry.insert(QStringLiteral("hover"), shopWnd->GetHoverRow() == rowIndex);
+        rows.push_back(entry);
+    }
+    state->setItemShopRows(rows);
+}
+
+void PopulateItemPurchaseState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemPurchaseWnd* const purchaseWnd = g_windowMgr.m_itemPurchaseWnd;
+    const bool visible = IsGameplayWindowVisible(state, purchaseWnd);
+    state->setItemPurchaseVisible(visible);
+    if (!visible) {
+        state->setItemPurchaseGeometry(0, 0, 0, 0);
+        state->setItemPurchaseTotal(0);
+        state->setItemPurchaseData(QVariantMap{});
+        state->setItemPurchaseRows(QVariantList{});
+        state->setItemPurchaseButtons(QVariantList{});
+        return;
+    }
+
+    state->setItemPurchaseGeometry(purchaseWnd->m_x, purchaseWnd->m_y, purchaseWnd->m_w, purchaseWnd->m_h);
+    state->setItemPurchaseTotal(g_session.m_shopDealTotal);
+    QVariantMap purchaseData;
+    purchaseData.insert(QStringLiteral("title"), QStringLiteral("Purchase"));
+    purchaseData.insert(QStringLiteral("nameLabel"), QStringLiteral("Item"));
+    purchaseData.insert(QStringLiteral("quantityLabel"), QStringLiteral("Qty"));
+    purchaseData.insert(QStringLiteral("amountLabel"), QStringLiteral("Cost"));
+    purchaseData.insert(QStringLiteral("totalLabel"), QStringLiteral("Total"));
+    state->setItemPurchaseData(purchaseData);
+
+    QVariantList rows;
+    const int startRow = purchaseWnd->GetViewOffset();
+    const int endRow = (std::min)(
+        static_cast<int>(g_session.m_shopDealRows.size()),
+        startRow + purchaseWnd->GetVisibleRowCountForQt() - 1);
+    rows.reserve((std::max)(0, endRow - startRow));
+    for (int rowIndex = startRow; rowIndex < endRow; ++rowIndex) {
+        const NPC_SHOP_DEAL_ROW& row = g_session.m_shopDealRows[static_cast<size_t>(rowIndex)];
+        QVariantMap entry;
+        entry.insert(QStringLiteral("name"), ToQString(shopui::GetItemDisplayName(row.itemInfo)));
+        entry.insert(QStringLiteral("quantity"), row.quantity);
+        entry.insert(QStringLiteral("cost"), row.unitPrice * row.quantity);
+        entry.insert(QStringLiteral("selected"), g_session.m_shopSelectedDealRow == rowIndex);
+        entry.insert(QStringLiteral("hover"), purchaseWnd->GetHoverRow() == rowIndex);
+        rows.push_back(entry);
+    }
+    state->setItemPurchaseRows(rows);
+
+    QVariantList buttons;
+    struct ButtonSpec {
+        int id;
+        const char* label;
+    };
+    const ButtonSpec specs[] = {
+        { 0, "Add" },
+        { 1, "Remove" },
+        { 2, "Buy" },
+        { 3, "Cancel" },
+    };
+    for (const ButtonSpec& spec : specs) {
+        QVariantMap button;
+        RECT rect{};
+        if (purchaseWnd->GetButtonRectForQt(spec.id, &rect)) {
+            button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+            button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+            button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+            button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
+        }
+        button.insert(QStringLiteral("label"), ToQString(spec.label));
+        button.insert(QStringLiteral("hot"), purchaseWnd->GetHoverButton() == spec.id);
+        button.insert(QStringLiteral("pressed"), purchaseWnd->GetPressedButton() == spec.id);
+        buttons.push_back(button);
+    }
+    state->setItemPurchaseButtons(buttons);
+}
+
+void PopulateItemSellState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemSellWnd* const sellWnd = g_windowMgr.m_itemSellWnd;
+    const bool visible = IsGameplayWindowVisible(state, sellWnd);
+    state->setItemSellVisible(visible);
+    if (!visible) {
+        state->setItemSellGeometry(0, 0, 0, 0);
+        state->setItemSellTotal(0);
+        state->setItemSellData(QVariantMap{});
+        state->setItemSellRows(QVariantList{});
+        state->setItemSellButtons(QVariantList{});
+        return;
+    }
+
+    state->setItemSellGeometry(sellWnd->m_x, sellWnd->m_y, sellWnd->m_w, sellWnd->m_h);
+    state->setItemSellTotal(g_session.m_shopDealTotal);
+    QVariantMap sellData;
+    sellData.insert(QStringLiteral("title"), QStringLiteral("Sell"));
+    sellData.insert(QStringLiteral("nameLabel"), QStringLiteral("Item"));
+    sellData.insert(QStringLiteral("quantityLabel"), QStringLiteral("Qty"));
+    sellData.insert(QStringLiteral("amountLabel"), QStringLiteral("Gain"));
+    sellData.insert(QStringLiteral("totalLabel"), QStringLiteral("Total"));
+    state->setItemSellData(sellData);
+
+    QVariantList rows;
+    const int startRow = sellWnd->GetViewOffset();
+    const int endRow = (std::min)(
+        static_cast<int>(g_session.m_shopDealRows.size()),
+        startRow + sellWnd->GetVisibleRowCountForQt() - 1);
+    rows.reserve((std::max)(0, endRow - startRow));
+    for (int rowIndex = startRow; rowIndex < endRow; ++rowIndex) {
+        const NPC_SHOP_DEAL_ROW& row = g_session.m_shopDealRows[static_cast<size_t>(rowIndex)];
+        QVariantMap entry;
+        entry.insert(QStringLiteral("name"), ToQString(shopui::GetItemDisplayName(row.itemInfo)));
+        entry.insert(QStringLiteral("quantity"), row.quantity);
+        entry.insert(QStringLiteral("gain"), row.unitPrice * row.quantity);
+        entry.insert(QStringLiteral("selected"), g_session.m_shopSelectedDealRow == rowIndex);
+        entry.insert(QStringLiteral("hover"), sellWnd->GetHoverRow() == rowIndex);
+        rows.push_back(entry);
+    }
+    state->setItemSellRows(rows);
+
+    QVariantList buttons;
+    struct ButtonSpec {
+        int id;
+        const char* label;
+    };
+    const ButtonSpec specs[] = {
+        { 0, "Add" },
+        { 1, "Remove" },
+        { 2, "Sell" },
+        { 3, "Cancel" },
+    };
+    for (const ButtonSpec& spec : specs) {
+        QVariantMap button;
+        RECT rect{};
+        if (sellWnd->GetButtonRectForQt(spec.id, &rect)) {
+            button.insert(QStringLiteral("x"), static_cast<int>(rect.left));
+            button.insert(QStringLiteral("y"), static_cast<int>(rect.top));
+            button.insert(QStringLiteral("width"), static_cast<int>(rect.right - rect.left));
+            button.insert(QStringLiteral("height"), static_cast<int>(rect.bottom - rect.top));
+        }
+        button.insert(QStringLiteral("label"), ToQString(spec.label));
+        button.insert(QStringLiteral("hot"), sellWnd->GetHoverButton() == spec.id);
+        button.insert(QStringLiteral("pressed"), sellWnd->GetPressedButton() == spec.id);
+        buttons.push_back(button);
+    }
+    state->setItemSellButtons(buttons);
+}
+
+void PopulateShortCutState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIShortCutWnd* const shortCutWnd = g_windowMgr.m_shortCutWnd;
+    const bool visible = IsGameplayWindowVisible(state, shortCutWnd);
+    state->setShortCutVisible(visible);
+    if (!visible) {
+        state->setShortCutGeometry(0, 0, 0, 0);
+        state->setShortCutPage(0);
+        state->setShortCutHoverSlot(-1);
+        state->setShortCutSlots(QVariantList{});
+        return;
+    }
+
+    state->setShortCutGeometry(shortCutWnd->m_x, shortCutWnd->m_y, shortCutWnd->m_w, shortCutWnd->m_h);
+    state->setShortCutPage(g_session.GetShortcutPage() + 1);
+    state->setShortCutHoverSlot(shortCutWnd->GetHoverSlot());
+
+    QVariantList shortcutSlots;
+    shortcutSlots.reserve(kShortcutSlotsPerPage);
+    for (int slotIndex = 0; slotIndex < kShortcutSlotsPerPage; ++slotIndex) {
+        QVariantMap slotEntry;
+        slotEntry.insert(QStringLiteral("index"), slotIndex);
+        slotEntry.insert(QStringLiteral("hover"), shortCutWnd->GetHoverSlot() == slotIndex);
+
+        const SHORTCUT_SLOT* slot = g_session.GetShortcutSlotByVisibleIndex(slotIndex);
+        if (slot && slot->id != 0) {
+            slotEntry.insert(QStringLiteral("occupied"), true);
+            slotEntry.insert(QStringLiteral("isSkill"), slot->isSkill != 0);
+            slotEntry.insert(QStringLiteral("skillId"), slot->isSkill != 0 ? static_cast<int>(slot->id) : 0);
+            slotEntry.insert(QStringLiteral("itemId"), slot->isSkill != 0 ? 0u : slot->id);
+            slotEntry.insert(QStringLiteral("label"), ResolveShortcutSlotLabel(slot));
+            slotEntry.insert(QStringLiteral("count"), static_cast<int>(slot->count));
+        } else {
+            slotEntry.insert(QStringLiteral("occupied"), false);
+            slotEntry.insert(QStringLiteral("isSkill"), false);
+            slotEntry.insert(QStringLiteral("skillId"), 0);
+            slotEntry.insert(QStringLiteral("itemId"), 0u);
+            slotEntry.insert(QStringLiteral("label"), QString());
+            slotEntry.insert(QStringLiteral("count"), 0);
+        }
+        shortcutSlots.push_back(slotEntry);
+    }
+    state->setShortCutSlots(shortcutSlots);
+}
+
+void PopulateBasicInfoState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIBasicInfoWnd* const basicInfoWnd = g_windowMgr.m_basicInfoWnd;
+    const bool visible = IsGameplayWindowVisible(state, basicInfoWnd);
+    state->setBasicInfoVisible(visible);
+    if (!visible) {
+        state->setBasicInfoGeometry(0, 0, 0, 0);
+        state->setBasicInfoMini(false);
+        state->setBasicInfoData(QVariantMap{});
+        return;
+    }
+
+    state->setBasicInfoGeometry(basicInfoWnd->m_x, basicInfoWnd->m_y, basicInfoWnd->m_w, basicInfoWnd->m_h);
+    state->setBasicInfoMini(basicInfoWnd->IsMiniMode());
+
+    UIBasicInfoWnd::DisplayData display{};
+    QVariantMap data;
+    if (basicInfoWnd->GetDisplayDataForQt(&display)) {
+        const QString jobName = ToQString(display.jobName);
+        data.insert(QStringLiteral("name"), ToQString(display.name));
+        data.insert(QStringLiteral("jobName"), jobName);
+        data.insert(QStringLiteral("level"), display.level);
+        data.insert(QStringLiteral("jobLevel"), display.jobLevel);
+        data.insert(QStringLiteral("hp"), display.hp);
+        data.insert(QStringLiteral("maxHp"), display.maxHp);
+        data.insert(QStringLiteral("sp"), display.sp);
+        data.insert(QStringLiteral("maxSp"), display.maxSp);
+        data.insert(QStringLiteral("money"), display.money);
+        data.insert(QStringLiteral("weight"), display.weight);
+        data.insert(QStringLiteral("maxWeight"), display.maxWeight);
+        data.insert(QStringLiteral("expPercent"), display.expPercent);
+        data.insert(QStringLiteral("jobExpPercent"), display.jobExpPercent);
+        data.insert(QStringLiteral("miniHeaderText"), FormatBasicInfoMiniHeaderText(display.level, jobName, display.expPercent));
+        data.insert(QStringLiteral("miniStatusText"),
+            FormatBasicInfoMiniStatusText(display.hp, display.maxHp, display.sp, display.maxSp, display.money));
+        data.insert(QStringLiteral("hpText"), FormatBasicGaugeText("HP", display.hp, display.maxHp));
+        data.insert(QStringLiteral("spText"), FormatBasicGaugeText("SP", display.sp, display.maxSp));
+        data.insert(QStringLiteral("baseLevelText"), FormatBasicLevelText("Base Lv.", display.level));
+        data.insert(QStringLiteral("jobLevelText"), FormatBasicLevelText("Job Lv.", display.jobLevel));
+        data.insert(QStringLiteral("weightText"),
+            QStringLiteral("Weight : %1 / %2").arg(display.weight).arg(display.maxWeight));
+        data.insert(QStringLiteral("moneyText"),
+            QStringLiteral("Zeny : %1").arg(display.money));
+
+        QVariantList systemButtons;
+        systemButtons.reserve(basicInfoWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < basicInfoWnd->GetQtSystemButtonCount(); ++index) {
+            UIBasicInfoWnd::QtButtonDisplay buttonDisplay{};
+            if (!basicInfoWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        QVariantList menuButtons;
+        menuButtons.reserve(basicInfoWnd->GetQtMenuButtonCount());
+        for (int index = 0; index < basicInfoWnd->GetQtMenuButtonCount(); ++index) {
+            UIBasicInfoWnd::QtButtonDisplay buttonDisplay{};
+            if (!basicInfoWnd->GetQtMenuButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            menuButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("menuButtons"), menuButtons);
+    }
+    state->setBasicInfoData(data);
+}
+
+void PopulateStatusState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIStatusWnd* const statusWnd = g_windowMgr.m_statusWnd;
+    const bool visible = IsGameplayWindowVisible(state, statusWnd);
+    state->setStatusVisible(visible);
+    if (!visible) {
+        state->setStatusGeometry(0, 0, 0, 0);
+        state->setStatusMini(false);
+        state->setStatusPage(0);
+        state->setStatusData(QVariantMap{});
+        return;
+    }
+
+    state->setStatusGeometry(statusWnd->m_x, statusWnd->m_y, statusWnd->m_w, statusWnd->m_h);
+    state->setStatusMini(statusWnd->IsMiniMode());
+    state->setStatusPage(statusWnd->GetPageForQt());
+
+    UIStatusWnd::DisplayData display{};
+    QVariantMap data;
+    if (statusWnd->GetDisplayDataForQt(&display)) {
+        static const char* const kLabels[] = { "STR", "AGI", "VIT", "INT", "DEX", "LUK" };
+
+        QVariantList stats;
+        stats.reserve(6);
+        for (int index = 0; index < 6; ++index) {
+            QVariantMap row;
+            row.insert(QStringLiteral("label"), QString::fromLatin1(kLabels[index]));
+            row.insert(QStringLiteral("value"), FormatBaseStatusText(display.baseStats[index], display.plusStats[index]));
+            row.insert(QStringLiteral("cost"), display.statCosts[index]);
+            UIStatusWnd::QtButtonDisplay incrementButton{};
+            const bool hasIncrementButton = statusWnd->GetQtIncrementButtonDisplayForQt(index, &incrementButton);
+            row.insert(QStringLiteral("canIncrease"), hasIncrementButton && incrementButton.visible);
+            if (hasIncrementButton) {
+                row.insert(QStringLiteral("increaseX"), incrementButton.x);
+                row.insert(QStringLiteral("increaseY"), incrementButton.y);
+                row.insert(QStringLiteral("increaseWidth"), incrementButton.width);
+                row.insert(QStringLiteral("increaseHeight"), incrementButton.height);
+                row.insert(QStringLiteral("increaseLabel"), ToQString(incrementButton.label));
+            }
+            stats.push_back(row);
+        }
+
+        data.insert(QStringLiteral("stats"), stats);
+
+        QVariantList systemButtons;
+        systemButtons.reserve(statusWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < statusWnd->GetQtSystemButtonCount(); ++index) {
+            UIStatusWnd::QtButtonDisplay buttonDisplay{};
+            if (!statusWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            button.insert(QStringLiteral("active"), buttonDisplay.active);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        QVariantList pageTabs;
+        pageTabs.reserve(statusWnd->GetQtPageTabCount());
+        for (int index = 0; index < statusWnd->GetQtPageTabCount(); ++index) {
+            UIStatusWnd::QtButtonDisplay buttonDisplay{};
+            if (!statusWnd->GetQtPageTabDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            button.insert(QStringLiteral("active"), buttonDisplay.active);
+            pageTabs.push_back(button);
+        }
+        data.insert(QStringLiteral("pageTabs"), pageTabs);
+
+        data.insert(QStringLiteral("title"), QStringLiteral("Status"));
+        data.insert(QStringLiteral("attackText"), FormatCompositeStatusText(display.attack, display.refineAttack));
+        data.insert(QStringLiteral("matkText"), FormatMatkStatusText(display.matkMin, display.matkMax));
+        data.insert(QStringLiteral("hit"), display.hit);
+        data.insert(QStringLiteral("critical"), display.critical);
+        data.insert(QStringLiteral("statusPoint"), display.statusPoint);
+        data.insert(QStringLiteral("itemDefText"), FormatCompositeStatusText(display.itemDef, display.plusDef));
+        data.insert(QStringLiteral("itemMdefText"), FormatCompositeStatusText(display.itemMdef, display.plusMdef));
+        data.insert(QStringLiteral("fleeText"), FormatCompositeStatusText(display.flee, display.plusFlee));
+        data.insert(QStringLiteral("aspdText"), FormatCompositeStatusText(display.aspd, display.plusAspd));
+        data.insert(QStringLiteral("miniPointsText"), QStringLiteral("Points %1").arg(display.statusPoint));
+        data.insert(QStringLiteral("attackLine"), QStringLiteral("Atk  %1").arg(data.value(QStringLiteral("attackText")).toString()));
+        data.insert(QStringLiteral("matkLine"), QStringLiteral("Matk %1").arg(data.value(QStringLiteral("matkText")).toString()));
+        data.insert(QStringLiteral("hitLine"), QStringLiteral("Hit   %1").arg(display.hit));
+        data.insert(QStringLiteral("critLine"), QStringLiteral("Crit  %1").arg(display.critical));
+        data.insert(QStringLiteral("pointsLine"), QStringLiteral("Pts %1").arg(display.statusPoint));
+        data.insert(QStringLiteral("defLine"), QStringLiteral("Def   %1").arg(data.value(QStringLiteral("itemDefText")).toString()));
+        data.insert(QStringLiteral("mdefLine"), QStringLiteral("Mdef %1").arg(data.value(QStringLiteral("itemMdefText")).toString()));
+        data.insert(QStringLiteral("fleeLine"), QStringLiteral("Flee  %1").arg(data.value(QStringLiteral("fleeText")).toString()));
+        data.insert(QStringLiteral("aspdLine"), QStringLiteral("Aspd %1").arg(data.value(QStringLiteral("aspdText")).toString()));
+    }
+    state->setStatusData(data);
+}
+
+void PopulateChatWindowState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UINewChatWnd* const chatWnd = g_windowMgr.m_chatWnd;
+    const bool visible = IsGameplayWindowVisible(state, chatWnd);
+    state->setChatWindowVisible(visible);
+    if (!visible) {
+        state->setChatWindowGeometry(0, 0, 0, 0);
+        state->setChatWindowInputActive(false);
+        state->setChatWindowWhisperInputActive(false);
+        state->setChatWindowMessageInputActive(false);
+        state->setChatWindowWhisperTargetText(QString());
+        state->setChatWindowInputText(QString());
+        state->setChatWindowLines(QVariantList{});
+        state->setChatWindowScrollBar(QVariantMap{});
+        state->setChatWindowUi(QVariantMap{});
+        return;
+    }
+
+    state->setChatWindowGeometry(chatWnd->m_x, chatWnd->m_y, chatWnd->m_w, chatWnd->m_h);
+    state->setChatWindowInputActive(chatWnd->IsInputActive());
+    state->setChatWindowWhisperInputActive(chatWnd->IsWhisperTargetActive());
+    state->setChatWindowMessageInputActive(chatWnd->IsMessageInputActive());
+    state->setChatWindowWhisperTargetText(ToQString(chatWnd->GetWhisperTargetText()));
+    state->setChatWindowInputText(ToQString(chatWnd->GetInputText()));
+
+    QVariantList lines;
+    const std::vector<ChatLine>& visibleLines = chatWnd->GetVisibleLines();
+    lines.reserve(static_cast<qsizetype>(visibleLines.size()));
+    for (const ChatLine& line : visibleLines) {
+        QVariantMap entry;
+        entry.insert(QStringLiteral("text"), ToQString(line.text));
+        entry.insert(QStringLiteral("color"),
+            ToCssColor(
+                static_cast<u8>((line.color >> 16) & 0xFFu),
+                static_cast<u8>((line.color >> 8) & 0xFFu),
+                static_cast<u8>(line.color & 0xFFu)));
+        lines.push_back(entry);
+    }
+    state->setChatWindowLines(lines);
+
+    const ChatScrollBarState scrollState = chatWnd->GetScrollBarState();
+    QVariantMap scrollBar;
+    scrollBar.insert(QStringLiteral("visible"), scrollState.visible != 0);
+    scrollBar.insert(QStringLiteral("totalLines"), scrollState.totalLines);
+    scrollBar.insert(QStringLiteral("firstVisibleLine"), scrollState.firstVisibleLine);
+    scrollBar.insert(QStringLiteral("visibleLineCount"), scrollState.visibleLineCount);
+    state->setChatWindowScrollBar(scrollBar);
+
+    QVariantMap chatUi;
+    QVariantList tabs;
+    tabs.reserve(chatWnd->GetTabCount());
+    for (int index = 0; index < chatWnd->GetTabCount(); ++index) {
+        ChatTabDisplay tab{};
+        if (!chatWnd->GetTabDisplay(index, &tab)) {
+            continue;
+        }
+
+        QVariantMap entry;
+        entry.insert(QStringLiteral("id"), tab.id);
+        entry.insert(QStringLiteral("label"), ToQString(tab.label));
+        entry.insert(QStringLiteral("active"), tab.active != 0);
+        tabs.push_back(entry);
+    }
+    chatUi.insert(QStringLiteral("tabs"), tabs);
+    chatUi.insert(QStringLiteral("fontPixelSize"), chatWnd->GetFontPixelSize());
+    chatUi.insert(QStringLiteral("windowOpacityPercent"), chatWnd->GetWindowOpacityPercent());
+    chatUi.insert(QStringLiteral("configVisible"), chatWnd->IsConfigVisible());
+
+    int configX = 0;
+    int configY = 0;
+    int configWidth = 0;
+    int configHeight = 0;
+    if (chatWnd->GetConfigRectForQt(&configX, &configY, &configWidth, &configHeight)) {
+        chatUi.insert(QStringLiteral("configX"), configX);
+        chatUi.insert(QStringLiteral("configY"), configY);
+        chatUi.insert(QStringLiteral("configWidth"), configWidth);
+        chatUi.insert(QStringLiteral("configHeight"), configHeight);
+    }
+
+    QVariantList filters;
+    filters.reserve(chatWnd->GetFilterOptionCount());
+    for (int index = 0; index < chatWnd->GetFilterOptionCount(); ++index) {
+        ChatFilterOptionDisplay filter{};
+        if (!chatWnd->GetFilterOptionDisplay(index, &filter)) {
+            continue;
+        }
+
+        QVariantMap entry;
+        entry.insert(QStringLiteral("id"), filter.id);
+        entry.insert(QStringLiteral("label"), ToQString(filter.label));
+        entry.insert(QStringLiteral("enabled"), filter.enabled != 0);
+        filters.push_back(entry);
+    }
+    chatUi.insert(QStringLiteral("filters"), filters);
+    state->setChatWindowUi(chatUi);
+}
+
+void PopulateRechargeGaugeState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIRechargeGage* rechargeGauge = nullptr;
+    for (UIWindow* const window : g_windowMgr.m_children) {
+        UIRechargeGage* const gauge = dynamic_cast<UIRechargeGage*>(window);
+        if (!gauge || gauge->m_show == 0) {
+            continue;
+        }
+        rechargeGauge = gauge;
+        break;
+    }
+
+    const bool visible = rechargeGauge != nullptr && !IsGameplayUiSuppressed(state);
+    state->setRechargeGaugeVisible(visible);
+    if (!visible) {
+        state->setRechargeGaugeGeometry(0, 0, 0, 0);
+        state->setRechargeGaugeProgress(0, 0);
+        return;
+    }
+
+    state->setRechargeGaugeGeometry(rechargeGauge->m_x, rechargeGauge->m_y, rechargeGauge->m_w, rechargeGauge->m_h);
+    state->setRechargeGaugeProgress(rechargeGauge->GetAmount(), rechargeGauge->GetTotalAmount());
+}
+
+void PopulateInventoryState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemWnd* const itemWnd = g_windowMgr.m_itemWnd;
+    const bool visible = IsGameplayWindowVisible(state, itemWnd);
+    state->setInventoryVisible(visible);
+    if (!visible) {
+        state->setInventoryGeometry(0, 0, 0, 0);
+        state->setInventoryMini(false);
+        state->setInventoryTab(0);
+        state->setInventoryData(QVariantMap{});
+        return;
+    }
+
+    state->setInventoryGeometry(itemWnd->m_x, itemWnd->m_y, itemWnd->m_w, itemWnd->m_h);
+    state->setInventoryMini(itemWnd->IsMiniMode());
+
+    UIItemWnd::DisplayData display{};
+    QVariantMap data;
+    if (itemWnd->GetDisplayDataForQt(&display)) {
+        state->setInventoryTab(display.currentTab);
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("currentItemCount"), display.currentItemCount);
+        data.insert(QStringLiteral("maxItemCount"), display.maxItemCount);
+        data.insert(QStringLiteral("viewOffset"), display.viewOffset);
+        data.insert(QStringLiteral("maxViewOffset"), display.maxViewOffset);
+        data.insert(QStringLiteral("scrollBarVisible"), display.scrollBarVisible);
+        data.insert(QStringLiteral("scrollTrackX"), display.scrollTrackX);
+        data.insert(QStringLiteral("scrollTrackY"), display.scrollTrackY);
+        data.insert(QStringLiteral("scrollTrackWidth"), display.scrollTrackWidth);
+        data.insert(QStringLiteral("scrollTrackHeight"), display.scrollTrackHeight);
+        data.insert(QStringLiteral("scrollThumbX"), display.scrollThumbX);
+        data.insert(QStringLiteral("scrollThumbY"), display.scrollThumbY);
+        data.insert(QStringLiteral("scrollThumbWidth"), display.scrollThumbWidth);
+        data.insert(QStringLiteral("scrollThumbHeight"), display.scrollThumbHeight);
+
+        QVariantList systemButtons;
+        systemButtons.reserve(itemWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < itemWnd->GetQtSystemButtonCount(); ++index) {
+            UIItemWnd::QtButtonDisplay buttonDisplay{};
+            if (!itemWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            button.insert(QStringLiteral("active"), buttonDisplay.active);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        QVariantList tabs;
+        tabs.reserve(itemWnd->GetQtTabCount());
+        for (int index = 0; index < itemWnd->GetQtTabCount(); ++index) {
+            UIItemWnd::QtButtonDisplay tabDisplay{};
+            if (!itemWnd->GetQtTabDisplayForQt(index, &tabDisplay)) {
+                continue;
+            }
+
+            QVariantMap tab;
+            tab.insert(QStringLiteral("id"), tabDisplay.id);
+            tab.insert(QStringLiteral("x"), tabDisplay.x);
+            tab.insert(QStringLiteral("y"), tabDisplay.y);
+            tab.insert(QStringLiteral("width"), tabDisplay.width);
+            tab.insert(QStringLiteral("height"), tabDisplay.height);
+            tab.insert(QStringLiteral("label"), ToQString(tabDisplay.label));
+            tab.insert(QStringLiteral("visible"), tabDisplay.visible);
+            tab.insert(QStringLiteral("active"), tabDisplay.active);
+            tabs.push_back(tab);
+        }
+        data.insert(QStringLiteral("tabs"), tabs);
+
+        QVariantList itemSlots;
+        itemSlots.reserve(static_cast<qsizetype>(display.displaySlots.size()));
+        for (const UIItemWnd::DisplaySlot& slot : display.displaySlots) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), slot.x);
+            entry.insert(QStringLiteral("y"), slot.y);
+            entry.insert(QStringLiteral("width"), slot.width);
+            entry.insert(QStringLiteral("height"), slot.height);
+            entry.insert(QStringLiteral("occupied"), slot.occupied);
+            entry.insert(QStringLiteral("hovered"), slot.hovered);
+            entry.insert(QStringLiteral("count"), slot.count);
+            entry.insert(QStringLiteral("itemId"), static_cast<uint>(slot.itemId));
+            entry.insert(QStringLiteral("label"), ToQString(slot.label));
+            entry.insert(QStringLiteral("tooltip"), ToQString(slot.tooltip));
+            itemSlots.push_back(entry);
+        }
+
+        data.insert(QStringLiteral("slots"), itemSlots);
+    } else {
+        state->setInventoryTab(0);
+    }
+    state->setInventoryData(data);
+}
+
+void PopulateStorageState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIStorageWnd* const storageWnd = g_windowMgr.m_storageWnd;
+    const bool visible = IsGameplayWindowVisible(state, storageWnd);
+    state->setStorageVisible(visible);
+    if (!visible) {
+        state->setStorageGeometry(0, 0, 0, 0);
+        state->setStorageMini(false);
+        state->setStorageTab(0);
+        state->setStorageData(QVariantMap{});
+        return;
+    }
+
+    state->setStorageGeometry(storageWnd->m_x, storageWnd->m_y, storageWnd->m_w, storageWnd->m_h);
+    state->setStorageMini(storageWnd->IsMiniMode());
+
+    UIStorageWnd::DisplayData display{};
+    QVariantMap data;
+    if (storageWnd->GetDisplayDataForQt(&display)) {
+        state->setStorageTab(display.currentTab);
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("currentItemCount"), display.currentItemCount);
+        data.insert(QStringLiteral("maxItemCount"), display.maxItemCount);
+        data.insert(QStringLiteral("viewOffset"), display.viewOffset);
+        data.insert(QStringLiteral("maxViewOffset"), display.maxViewOffset);
+        data.insert(QStringLiteral("scrollBarVisible"), display.scrollBarVisible);
+        data.insert(QStringLiteral("scrollTrackX"), display.scrollTrackX);
+        data.insert(QStringLiteral("scrollTrackY"), display.scrollTrackY);
+        data.insert(QStringLiteral("scrollTrackWidth"), display.scrollTrackWidth);
+        data.insert(QStringLiteral("scrollTrackHeight"), display.scrollTrackHeight);
+        data.insert(QStringLiteral("scrollThumbX"), display.scrollThumbX);
+        data.insert(QStringLiteral("scrollThumbY"), display.scrollThumbY);
+        data.insert(QStringLiteral("scrollThumbWidth"), display.scrollThumbWidth);
+        data.insert(QStringLiteral("scrollThumbHeight"), display.scrollThumbHeight);
+
+        QVariantList systemButtons;
+        systemButtons.reserve(storageWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < storageWnd->GetQtSystemButtonCount(); ++index) {
+            UIStorageWnd::QtButtonDisplay buttonDisplay{};
+            if (!storageWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            button.insert(QStringLiteral("active"), buttonDisplay.active);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        QVariantList tabs;
+        tabs.reserve(storageWnd->GetQtTabCount());
+        for (int index = 0; index < storageWnd->GetQtTabCount(); ++index) {
+            UIStorageWnd::QtButtonDisplay tabDisplay{};
+            if (!storageWnd->GetQtTabDisplayForQt(index, &tabDisplay)) {
+                continue;
+            }
+
+            QVariantMap tab;
+            tab.insert(QStringLiteral("id"), tabDisplay.id);
+            tab.insert(QStringLiteral("x"), tabDisplay.x);
+            tab.insert(QStringLiteral("y"), tabDisplay.y);
+            tab.insert(QStringLiteral("width"), tabDisplay.width);
+            tab.insert(QStringLiteral("height"), tabDisplay.height);
+            tab.insert(QStringLiteral("label"), ToQString(tabDisplay.label));
+            tab.insert(QStringLiteral("visible"), tabDisplay.visible);
+            tab.insert(QStringLiteral("active"), tabDisplay.active);
+            tabs.push_back(tab);
+        }
+        data.insert(QStringLiteral("tabs"), tabs);
+
+        QVariantList itemSlots;
+        itemSlots.reserve(static_cast<qsizetype>(display.displaySlots.size()));
+        for (const UIStorageWnd::DisplaySlot& slot : display.displaySlots) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), slot.x);
+            entry.insert(QStringLiteral("y"), slot.y);
+            entry.insert(QStringLiteral("width"), slot.width);
+            entry.insert(QStringLiteral("height"), slot.height);
+            entry.insert(QStringLiteral("occupied"), slot.occupied);
+            entry.insert(QStringLiteral("hovered"), slot.hovered);
+            entry.insert(QStringLiteral("count"), slot.count);
+            entry.insert(QStringLiteral("itemId"), static_cast<uint>(slot.itemId));
+            entry.insert(QStringLiteral("label"), ToQString(slot.label));
+            entry.insert(QStringLiteral("tooltip"), ToQString(slot.tooltip));
+            itemSlots.push_back(entry);
+        }
+
+        data.insert(QStringLiteral("slots"), itemSlots);
+    } else {
+        state->setStorageTab(0);
+    }
+    state->setStorageData(data);
+}
+
+void PopulateFriendPartyState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIMessengerGroupWnd* const friendPartyWnd = g_windowMgr.m_messengerGroupWnd;
+    const bool visible = IsGameplayWindowVisible(state, friendPartyWnd);
+    state->setFriendPartyVisible(visible);
+    if (!visible) {
+        state->setFriendPartyGeometry(0, 0, 0, 0);
+        state->setFriendPartyData(QVariantMap{});
+        return;
+    }
+
+    state->setFriendPartyGeometry(friendPartyWnd->m_x, friendPartyWnd->m_y, friendPartyWnd->m_w, friendPartyWnd->m_h);
+
+    UIMessengerGroupWnd::DisplayData display{};
+    QVariantMap data;
+    if (friendPartyWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("summaryTitle"), ToQString(display.summaryTitle));
+        data.insert(QStringLiteral("summaryValue"), ToQString(display.summaryValue));
+        data.insert(QStringLiteral("summarySecondaryValue"), ToQString(display.summarySecondaryValue));
+        data.insert(QStringLiteral("currentTab"), display.currentTab);
+        data.insert(QStringLiteral("selectedIndex"), display.selectedIndex);
+        data.insert(QStringLiteral("viewOffset"), display.viewOffset);
+        data.insert(QStringLiteral("maxViewOffset"), display.maxViewOffset);
+        data.insert(QStringLiteral("scrollBarVisible"), display.scrollBarVisible);
+        data.insert(QStringLiteral("scrollTrackX"), display.scrollTrackX);
+        data.insert(QStringLiteral("scrollTrackY"), display.scrollTrackY);
+        data.insert(QStringLiteral("scrollTrackWidth"), display.scrollTrackWidth);
+        data.insert(QStringLiteral("scrollTrackHeight"), display.scrollTrackHeight);
+        data.insert(QStringLiteral("scrollThumbX"), display.scrollThumbX);
+        data.insert(QStringLiteral("scrollThumbY"), display.scrollThumbY);
+        data.insert(QStringLiteral("scrollThumbWidth"), display.scrollThumbWidth);
+        data.insert(QStringLiteral("scrollThumbHeight"), display.scrollThumbHeight);
+
+        QVariantList systemButtons;
+        systemButtons.reserve(friendPartyWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < friendPartyWnd->GetQtSystemButtonCount(); ++index) {
+            UIMessengerGroupWnd::QtButtonDisplay buttonDisplay{};
+            if (!friendPartyWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            button.insert(QStringLiteral("active"), buttonDisplay.active);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        QVariantList tabs;
+        tabs.reserve(friendPartyWnd->GetQtTabCount());
+        for (int index = 0; index < friendPartyWnd->GetQtTabCount(); ++index) {
+            UIMessengerGroupWnd::QtButtonDisplay tabDisplay{};
+            if (!friendPartyWnd->GetQtTabDisplayForQt(index, &tabDisplay)) {
+                continue;
+            }
+
+            QVariantMap tab;
+            tab.insert(QStringLiteral("id"), tabDisplay.id);
+            tab.insert(QStringLiteral("x"), tabDisplay.x);
+            tab.insert(QStringLiteral("y"), tabDisplay.y);
+            tab.insert(QStringLiteral("width"), tabDisplay.width);
+            tab.insert(QStringLiteral("height"), tabDisplay.height);
+            tab.insert(QStringLiteral("label"), ToQString(tabDisplay.label));
+            tab.insert(QStringLiteral("visible"), tabDisplay.visible);
+            tab.insert(QStringLiteral("active"), tabDisplay.active);
+            tabs.push_back(tab);
+        }
+        data.insert(QStringLiteral("tabs"), tabs);
+
+        QVariantList rows;
+        rows.reserve(static_cast<qsizetype>(display.rows.size()));
+        for (const UIMessengerGroupWnd::DisplayRow& row : display.rows) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), row.x);
+            entry.insert(QStringLiteral("y"), row.y);
+            entry.insert(QStringLiteral("width"), row.width);
+            entry.insert(QStringLiteral("height"), row.height);
+            entry.insert(QStringLiteral("selected"), row.selected);
+            entry.insert(QStringLiteral("color"), row.color);
+            entry.insert(QStringLiteral("name"), ToQString(row.name));
+            entry.insert(QStringLiteral("status"), ToQString(row.status));
+            entry.insert(QStringLiteral("detail"), ToQString(row.detail));
+            rows.push_back(entry);
+        }
+        data.insert(QStringLiteral("rows"), rows);
+
+        QVariantList actionButtons;
+        actionButtons.reserve(static_cast<qsizetype>(display.actionButtons.size()));
+        for (const UIMessengerGroupWnd::QtButtonDisplay& buttonDisplay : display.actionButtons) {
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            button.insert(QStringLiteral("active"), buttonDisplay.active);
+            actionButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("actionButtons"), actionButtons);
+    }
+
+    state->setFriendPartyData(data);
+}
+
+void PopulatePartySetupState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIPartyOptionWnd* const partySetupWnd = g_windowMgr.m_partyOptionWnd;
+    const bool visible = IsGameplayWindowVisible(state, partySetupWnd);
+    state->setPartySetupVisible(visible);
+    if (!visible) {
+        state->setPartySetupGeometry(0, 0, 0, 0);
+        state->setPartySetupData(QVariantMap{});
+        return;
+    }
+
+    state->setPartySetupGeometry(partySetupWnd->m_x, partySetupWnd->m_y, partySetupWnd->m_w, partySetupWnd->m_h);
+
+    UIPartyOptionWnd::DisplayData display{};
+    QVariantMap data;
+    if (partySetupWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("showNameEdit"), display.showNameEdit);
+        data.insert(QStringLiteral("nameFocused"), display.nameFocused);
+        data.insert(QStringLiteral("nameLabel"), ToQString(display.nameLabel));
+        data.insert(QStringLiteral("nameValue"), ToQString(display.nameValue));
+        data.insert(QStringLiteral("nameFieldX"), display.nameFieldX);
+        data.insert(QStringLiteral("nameFieldY"), display.nameFieldY);
+        data.insert(QStringLiteral("nameFieldWidth"), display.nameFieldWidth);
+        data.insert(QStringLiteral("nameFieldHeight"), display.nameFieldHeight);
+        data.insert(QStringLiteral("tooltipText"), ToQString(display.tooltipText));
+        data.insert(QStringLiteral("tooltipX"), display.tooltipX);
+        data.insert(QStringLiteral("tooltipY"), display.tooltipY);
+
+        QVariantList labels;
+        labels.reserve(static_cast<qsizetype>(display.labels.size()));
+        for (const UIPartyOptionWnd::DisplayLabel& label : display.labels) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), label.x);
+            entry.insert(QStringLiteral("y"), label.y);
+            entry.insert(QStringLiteral("width"), label.width);
+            entry.insert(QStringLiteral("height"), label.height);
+            entry.insert(QStringLiteral("text"), ToQString(label.text));
+            entry.insert(QStringLiteral("header"), label.header);
+            labels.push_back(entry);
+        }
+        data.insert(QStringLiteral("labels"), labels);
+
+        QVariantList choices;
+        choices.reserve(static_cast<qsizetype>(display.choices.size()));
+        for (const UIPartyOptionWnd::DisplayChoice& choice : display.choices) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("groupId"), choice.groupId);
+            entry.insert(QStringLiteral("optionId"), choice.optionId);
+            entry.insert(QStringLiteral("x"), choice.x);
+            entry.insert(QStringLiteral("y"), choice.y);
+            entry.insert(QStringLiteral("width"), choice.width);
+            entry.insert(QStringLiteral("height"), choice.height);
+            entry.insert(QStringLiteral("label"), ToQString(choice.label));
+            entry.insert(QStringLiteral("selected"), choice.selected);
+            choices.push_back(entry);
+        }
+        data.insert(QStringLiteral("choices"), choices);
+
+        QVariantList helpIcons;
+        helpIcons.reserve(static_cast<qsizetype>(display.helpIcons.size()));
+        for (const UIPartyOptionWnd::DisplayHelpIcon& helpIcon : display.helpIcons) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("groupId"), helpIcon.groupId);
+            entry.insert(QStringLiteral("x"), helpIcon.x);
+            entry.insert(QStringLiteral("y"), helpIcon.y);
+            entry.insert(QStringLiteral("width"), helpIcon.width);
+            entry.insert(QStringLiteral("height"), helpIcon.height);
+            entry.insert(QStringLiteral("hovered"), helpIcon.hovered);
+            helpIcons.push_back(entry);
+        }
+        data.insert(QStringLiteral("helpIcons"), helpIcons);
+
+        QVariantList buttons;
+        buttons.reserve(static_cast<qsizetype>(display.buttons.size()));
+        for (const UIPartyOptionWnd::QtButtonDisplay& buttonDisplay : display.buttons) {
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            button.insert(QStringLiteral("active"), buttonDisplay.active);
+            buttons.push_back(button);
+        }
+        data.insert(QStringLiteral("buttons"), buttons);
+    }
+
+    state->setPartySetupData(data);
+}
+
+void PopulatePartyInviteState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIJoinPartyAcceptWnd* const partyInviteWnd = g_windowMgr.m_joinPartyAcceptWnd;
+    const bool visible = IsGameplayWindowVisible(state, partyInviteWnd);
+    state->setPartyInviteVisible(visible);
+    if (!visible) {
+        state->setPartyInviteGeometry(0, 0, 0, 0);
+        state->setPartyInviteData(QVariantMap{});
+        return;
+    }
+
+    state->setPartyInviteGeometry(partyInviteWnd->m_x, partyInviteWnd->m_y, partyInviteWnd->m_w, partyInviteWnd->m_h);
+
+    UIJoinPartyAcceptWnd::DisplayData display{};
+    QVariantMap data;
+    if (partyInviteWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("bodyText"), ToQString(display.bodyText));
+
+        QVariantList messageLines;
+        messageLines.reserve(static_cast<qsizetype>(display.messageLines.size()));
+        for (const std::string& line : display.messageLines) {
+            messageLines.push_back(ToQString(line));
+        }
+        data.insert(QStringLiteral("messageLines"), messageLines);
+
+        QVariantList buttons;
+        buttons.reserve(static_cast<qsizetype>(display.buttons.size()));
+        for (const UIJoinPartyAcceptWnd::QtButtonDisplay& buttonDisplay : display.buttons) {
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("active"), buttonDisplay.active);
+            buttons.push_back(button);
+        }
+        data.insert(QStringLiteral("buttons"), buttons);
+    }
+
+    state->setPartyInviteData(data);
+}
+
+void PopulateEquipState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIEquipWnd* const equipWnd = g_windowMgr.m_equipWnd;
+    const bool visible = IsGameplayWindowVisible(state, equipWnd);
+    state->setEquipVisible(visible);
+    if (!visible) {
+        state->setEquipGeometry(0, 0, 0, 0);
+        state->setEquipMini(false);
+        state->setEquipData(QVariantMap{});
+        return;
+    }
+
+    state->setEquipGeometry(equipWnd->m_x, equipWnd->m_y, equipWnd->m_w, equipWnd->m_h);
+    state->setEquipMini(equipWnd->IsMiniMode());
+
+    UIEquipWnd::DisplayData display{};
+    QVariantMap data;
+    if (equipWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), QStringLiteral("Equipment"));
+        data.insert(
+            QStringLiteral("previewRevision"),
+            QString::number(static_cast<qulonglong>(equipWnd->GetQtPreviewRevision())));
+        QVariantList systemButtons;
+        systemButtons.reserve(equipWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < equipWnd->GetQtSystemButtonCount(); ++index) {
+            UIEquipWnd::QtButtonDisplay buttonDisplay{};
+            if (!equipWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        QVariantList equipSlots;
+        equipSlots.reserve(static_cast<qsizetype>(display.displaySlots.size()));
+        for (const UIEquipWnd::DisplaySlot& slot : display.displaySlots) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), slot.x);
+            entry.insert(QStringLiteral("y"), slot.y);
+            entry.insert(QStringLiteral("width"), slot.width);
+            entry.insert(QStringLiteral("height"), slot.height);
+            entry.insert(QStringLiteral("occupied"), slot.occupied);
+            entry.insert(QStringLiteral("hovered"), slot.hovered);
+            entry.insert(QStringLiteral("leftColumn"), slot.leftColumn);
+            entry.insert(QStringLiteral("itemId"), static_cast<uint>(slot.itemId));
+            entry.insert(QStringLiteral("label"), ToQString(slot.label));
+            equipSlots.push_back(entry);
+        }
+        data.insert(QStringLiteral("slots"), equipSlots);
+    }
+    state->setEquipData(data);
+}
+
+void PopulateSkillListState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISkillListWnd* const skillWnd = g_windowMgr.m_skillListWnd;
+    const bool visible = IsGameplayWindowVisible(state, skillWnd);
+    state->setSkillListVisible(visible);
+    if (!visible) {
+        state->setSkillListGeometry(0, 0, 0, 0);
+        state->setSkillListData(QVariantMap{});
+        return;
+    }
+
+    state->setSkillListGeometry(skillWnd->m_x, skillWnd->m_y, skillWnd->m_w, skillWnd->m_h);
+
+    UISkillListWnd::DisplayData display{};
+    QVariantMap data;
+    if (skillWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), QStringLiteral("Skill Tree"));
+        QVariantList systemButtons;
+        systemButtons.reserve(skillWnd->GetQtSystemButtonCount());
+        for (int index = 0; index < skillWnd->GetQtSystemButtonCount(); ++index) {
+            UISkillListWnd::QtButtonDisplay buttonDisplay{};
+            if (!skillWnd->GetQtSystemButtonDisplayForQt(index, &buttonDisplay)) {
+                continue;
+            }
+
+            QVariantMap button;
+            button.insert(QStringLiteral("id"), buttonDisplay.id);
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        data.insert(QStringLiteral("skillPointCount"), display.skillPointCount);
+        data.insert(QStringLiteral("skillPointText"), QStringLiteral("Skill Point : %1").arg(display.skillPointCount));
+        data.insert(QStringLiteral("upgradeLabel"), QStringLiteral("+"));
+        data.insert(QStringLiteral("viewOffset"), display.viewOffset);
+        data.insert(QStringLiteral("maxViewOffset"), display.maxViewOffset);
+        data.insert(QStringLiteral("scrollBarVisible"), display.scrollBarVisible);
+        data.insert(QStringLiteral("scrollTrackX"), display.scrollTrackX);
+        data.insert(QStringLiteral("scrollTrackY"), display.scrollTrackY);
+        data.insert(QStringLiteral("scrollTrackWidth"), display.scrollTrackWidth);
+        data.insert(QStringLiteral("scrollTrackHeight"), display.scrollTrackHeight);
+        data.insert(QStringLiteral("scrollThumbX"), display.scrollThumbX);
+        data.insert(QStringLiteral("scrollThumbY"), display.scrollThumbY);
+        data.insert(QStringLiteral("scrollThumbWidth"), display.scrollThumbWidth);
+        data.insert(QStringLiteral("scrollThumbHeight"), display.scrollThumbHeight);
+
+        QVariantList rows;
+        rows.reserve(static_cast<qsizetype>(display.rows.size()));
+        for (const UISkillListWnd::DisplayRow& row : display.rows) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("skillId"), row.skillId);
+            entry.insert(QStringLiteral("x"), row.x);
+            entry.insert(QStringLiteral("y"), row.y);
+            entry.insert(QStringLiteral("width"), row.width);
+            entry.insert(QStringLiteral("height"), row.height);
+            entry.insert(QStringLiteral("iconVisible"), row.iconVisible);
+            entry.insert(QStringLiteral("selected"), row.selected);
+            entry.insert(QStringLiteral("hovered"), row.hovered);
+            entry.insert(QStringLiteral("upgradeVisible"), row.upgradeVisible);
+            entry.insert(QStringLiteral("upgradePressed"), row.upgradePressed);
+            entry.insert(QStringLiteral("upgradeX"), row.upgradeX);
+            entry.insert(QStringLiteral("upgradeY"), row.upgradeY);
+            entry.insert(QStringLiteral("upgradeWidth"), row.upgradeWidth);
+            entry.insert(QStringLiteral("upgradeHeight"), row.upgradeHeight);
+            entry.insert(QStringLiteral("name"), ToQString(row.name));
+            entry.insert(QStringLiteral("levelText"), ToQString(row.levelText));
+            entry.insert(QStringLiteral("rightText"), ToQString(row.rightText));
+            rows.push_back(entry);
+        }
+        data.insert(QStringLiteral("rows"), rows);
+
+        QVariantList buttons;
+        buttons.reserve(static_cast<qsizetype>(display.bottomButtons.size()));
+        for (const UISkillListWnd::DisplayButton& button : display.bottomButtons) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), button.x);
+            entry.insert(QStringLiteral("y"), button.y);
+            entry.insert(QStringLiteral("width"), button.width);
+            entry.insert(QStringLiteral("height"), button.height);
+            entry.insert(QStringLiteral("hovered"), button.hovered);
+            entry.insert(QStringLiteral("pressed"), button.pressed);
+            entry.insert(QStringLiteral("label"), ToQString(button.label));
+            buttons.push_back(entry);
+        }
+        data.insert(QStringLiteral("bottomButtons"), buttons);
+    }
+    state->setSkillListData(data);
+}
+
+void PopulateItemInfoState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemInfoWnd* const itemInfoWnd = g_windowMgr.m_itemInfoWnd;
+    const bool visible = IsGameplayWindowVisible(state, itemInfoWnd) && itemInfoWnd->HasItem();
+    state->setItemInfoVisible(visible);
+    if (!visible) {
+        state->setItemInfoGeometry(0, 0, 0, 0);
+        state->setItemInfoData(QVariantMap{});
+        return;
+    }
+
+    state->setItemInfoGeometry(itemInfoWnd->m_x, itemInfoWnd->m_y, itemInfoWnd->m_w, itemInfoWnd->m_h);
+
+    UIItemInfoWnd::DisplayData display{};
+    QVariantMap data;
+    if (itemInfoWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("itemId"), static_cast<uint>(display.itemId));
+        data.insert(QStringLiteral("identified"), display.identified);
+        data.insert(QStringLiteral("name"), ToQString(display.name));
+        data.insert(QStringLiteral("previewUsesCollection"), display.previewUsesCollection);
+        data.insert(QStringLiteral("description"), ToQString(display.description));
+
+        QVariantList detailLines;
+        detailLines.reserve(static_cast<qsizetype>(display.detailLines.size()));
+        for (const std::string& line : display.detailLines) {
+            detailLines.push_back(ToQString(line));
+        }
+        data.insert(QStringLiteral("detailLines"), detailLines);
+
+        QVariantMap closeButton;
+        closeButton.insert(QStringLiteral("x"), display.closeButton.x);
+        closeButton.insert(QStringLiteral("y"), display.closeButton.y);
+        closeButton.insert(QStringLiteral("width"), display.closeButton.width);
+        closeButton.insert(QStringLiteral("height"), display.closeButton.height);
+        closeButton.insert(QStringLiteral("hovered"), display.closeButton.hovered);
+        closeButton.insert(QStringLiteral("pressed"), display.closeButton.pressed);
+        closeButton.insert(QStringLiteral("label"), ToQString(display.closeButton.label));
+        data.insert(QStringLiteral("closeButton"), closeButton);
+
+        QVariantMap graphicsButton;
+        graphicsButton.insert(QStringLiteral("x"), display.graphicsButton.x);
+        graphicsButton.insert(QStringLiteral("y"), display.graphicsButton.y);
+        graphicsButton.insert(QStringLiteral("width"), display.graphicsButton.width);
+        graphicsButton.insert(QStringLiteral("height"), display.graphicsButton.height);
+        graphicsButton.insert(QStringLiteral("hovered"), display.graphicsButton.hovered);
+        graphicsButton.insert(QStringLiteral("pressed"), display.graphicsButton.pressed);
+        graphicsButton.insert(QStringLiteral("enabled"), display.graphicsButton.enabled);
+        graphicsButton.insert(QStringLiteral("visible"), display.graphicsButton.visible);
+        graphicsButton.insert(QStringLiteral("label"), ToQString(display.graphicsButton.label));
+        data.insert(QStringLiteral("graphicsButton"), graphicsButton);
+
+        QVariantList slotList;
+        slotList.reserve(static_cast<qsizetype>(display.slotEntries.size()));
+        for (const UIItemInfoWnd::DisplaySlot& slot : display.slotEntries) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), slot.x);
+            entry.insert(QStringLiteral("y"), slot.y);
+            entry.insert(QStringLiteral("width"), slot.width);
+            entry.insert(QStringLiteral("height"), slot.height);
+            entry.insert(QStringLiteral("available"), slot.available);
+            entry.insert(QStringLiteral("occupied"), slot.occupied);
+            entry.insert(QStringLiteral("hovered"), slot.hovered);
+            entry.insert(QStringLiteral("itemId"), static_cast<uint>(slot.itemId));
+            entry.insert(QStringLiteral("tooltip"), ToQString(slot.tooltip));
+            slotList.push_back(entry);
+        }
+        data.insert(QStringLiteral("slots"), slotList);
+    }
+    state->setItemInfoData(data);
+}
+
+void PopulateSkillDescribeState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UISkillDescribeWnd* const skillDescribeWnd = g_windowMgr.m_skillDescribeWnd;
+    const bool visible = IsGameplayWindowVisible(state, skillDescribeWnd) && skillDescribeWnd->HasSkill();
+    state->setSkillDescribeVisible(visible);
+    if (!visible) {
+        state->setSkillDescribeGeometry(0, 0, 0, 0);
+        state->setSkillDescribeData(QVariantMap{});
+        return;
+    }
+
+    state->setSkillDescribeGeometry(skillDescribeWnd->m_x, skillDescribeWnd->m_y, skillDescribeWnd->m_w, skillDescribeWnd->m_h);
+
+    UISkillDescribeWnd::DisplayData display{};
+    QVariantMap data;
+    if (skillDescribeWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("skillId"), display.skillId);
+        data.insert(QStringLiteral("name"), ToQString(display.name));
+        data.insert(QStringLiteral("description"), ToQString(display.description));
+        data.insert(QStringLiteral("descriptionX"), display.descriptionX);
+        data.insert(QStringLiteral("descriptionY"), display.descriptionY);
+        data.insert(QStringLiteral("descriptionWidth"), display.descriptionWidth);
+        data.insert(QStringLiteral("descriptionHeight"), display.descriptionHeight);
+        data.insert(QStringLiteral("descriptionContentHeight"), display.descriptionContentHeight);
+        data.insert(QStringLiteral("descriptionScrollOffset"), display.descriptionScrollOffset);
+
+        QVariantList detailLines;
+        detailLines.reserve(static_cast<qsizetype>(display.detailLines.size()));
+        for (const std::string& line : display.detailLines) {
+            if (!line.empty()) {
+                detailLines.push_back(ToQString(line));
+            }
+        }
+        data.insert(QStringLiteral("detailLines"), detailLines);
+
+        QVariantMap closeButton;
+        closeButton.insert(QStringLiteral("x"), display.closeButton.x);
+        closeButton.insert(QStringLiteral("y"), display.closeButton.y);
+        closeButton.insert(QStringLiteral("width"), display.closeButton.width);
+        closeButton.insert(QStringLiteral("height"), display.closeButton.height);
+        closeButton.insert(QStringLiteral("hovered"), display.closeButton.hovered);
+        closeButton.insert(QStringLiteral("pressed"), display.closeButton.pressed);
+        closeButton.insert(QStringLiteral("label"), ToQString(display.closeButton.label));
+        data.insert(QStringLiteral("closeButton"), closeButton);
+
+        QVariantMap descriptionScrollBar;
+        descriptionScrollBar.insert(QStringLiteral("visible"), display.descriptionScrollBar.visible);
+        descriptionScrollBar.insert(QStringLiteral("trackX"), display.descriptionScrollBar.trackX);
+        descriptionScrollBar.insert(QStringLiteral("trackY"), display.descriptionScrollBar.trackY);
+        descriptionScrollBar.insert(QStringLiteral("trackWidth"), display.descriptionScrollBar.trackWidth);
+        descriptionScrollBar.insert(QStringLiteral("trackHeight"), display.descriptionScrollBar.trackHeight);
+        descriptionScrollBar.insert(QStringLiteral("thumbX"), display.descriptionScrollBar.thumbX);
+        descriptionScrollBar.insert(QStringLiteral("thumbY"), display.descriptionScrollBar.thumbY);
+        descriptionScrollBar.insert(QStringLiteral("thumbWidth"), display.descriptionScrollBar.thumbWidth);
+        descriptionScrollBar.insert(QStringLiteral("thumbHeight"), display.descriptionScrollBar.thumbHeight);
+        data.insert(QStringLiteral("descriptionScrollBar"), descriptionScrollBar);
+    }
+    state->setSkillDescribeData(data);
+}
+
+void PopulateItemCollectionState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemCollectionWnd* const itemCollectionWnd = g_windowMgr.m_itemCollectionWnd;
+    const bool visible = IsGameplayWindowVisible(state, itemCollectionWnd) && itemCollectionWnd->HasItem();
+    state->setItemCollectionVisible(visible);
+    if (!visible) {
+        state->setItemCollectionGeometry(0, 0, 0, 0);
+        state->setItemCollectionData(QVariantMap{});
+        return;
+    }
+
+    state->setItemCollectionGeometry(itemCollectionWnd->m_x, itemCollectionWnd->m_y, itemCollectionWnd->m_w, itemCollectionWnd->m_h);
+
+    UIItemCollectionWnd::DisplayData display{};
+    QVariantMap data;
+    if (itemCollectionWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("itemId"), static_cast<uint>(display.itemId));
+        data.insert(QStringLiteral("mainUsesIllust"), display.mainUsesIllust);
+        data.insert(QStringLiteral("mainUsesCollection"), display.mainUsesCollection);
+
+        QVariantMap closeButton;
+        closeButton.insert(QStringLiteral("x"), display.closeButton.x);
+        closeButton.insert(QStringLiteral("y"), display.closeButton.y);
+        closeButton.insert(QStringLiteral("width"), display.closeButton.width);
+        closeButton.insert(QStringLiteral("height"), display.closeButton.height);
+        closeButton.insert(QStringLiteral("hovered"), display.closeButton.hovered);
+        closeButton.insert(QStringLiteral("pressed"), display.closeButton.pressed);
+        closeButton.insert(QStringLiteral("label"), ToQString(display.closeButton.label));
+        data.insert(QStringLiteral("closeButton"), closeButton);
+    }
+    state->setItemCollectionData(data);
+}
+
+void PopulateItemIdentifyState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemIdentifyWnd* const itemIdentifyWnd = g_windowMgr.m_itemIdentifyWnd;
+    const bool visible = IsGameplayWindowVisible(state, itemIdentifyWnd);
+    state->setItemIdentifyVisible(visible);
+    if (!visible) {
+        state->setItemIdentifyGeometry(0, 0, 0, 0);
+        state->setItemIdentifyData(QVariantMap{});
+        return;
+    }
+
+    state->setItemIdentifyGeometry(itemIdentifyWnd->m_x, itemIdentifyWnd->m_y, itemIdentifyWnd->m_w, itemIdentifyWnd->m_h);
+
+    UIItemIdentifyWnd::DisplayData display{};
+    QVariantMap data;
+    if (itemIdentifyWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("emptyText"), ToQString(display.emptyText));
+
+        QVariantMap closeButton;
+        closeButton.insert(QStringLiteral("x"), display.closeButton.x);
+        closeButton.insert(QStringLiteral("y"), display.closeButton.y);
+        closeButton.insert(QStringLiteral("width"), display.closeButton.width);
+        closeButton.insert(QStringLiteral("height"), display.closeButton.height);
+        closeButton.insert(QStringLiteral("hovered"), display.closeButton.hovered);
+        closeButton.insert(QStringLiteral("pressed"), display.closeButton.pressed);
+        closeButton.insert(QStringLiteral("label"), ToQString(display.closeButton.label));
+        data.insert(QStringLiteral("closeButton"), closeButton);
+
+        QVariantMap okButton;
+        okButton.insert(QStringLiteral("x"), display.okButton.x);
+        okButton.insert(QStringLiteral("y"), display.okButton.y);
+        okButton.insert(QStringLiteral("width"), display.okButton.width);
+        okButton.insert(QStringLiteral("height"), display.okButton.height);
+        okButton.insert(QStringLiteral("hovered"), display.okButton.hovered);
+        okButton.insert(QStringLiteral("pressed"), display.okButton.pressed);
+        okButton.insert(QStringLiteral("enabled"), display.okButton.enabled);
+        okButton.insert(QStringLiteral("label"), ToQString(display.okButton.label));
+        data.insert(QStringLiteral("okButton"), okButton);
+
+        QVariantMap cancelButton;
+        cancelButton.insert(QStringLiteral("x"), display.cancelButton.x);
+        cancelButton.insert(QStringLiteral("y"), display.cancelButton.y);
+        cancelButton.insert(QStringLiteral("width"), display.cancelButton.width);
+        cancelButton.insert(QStringLiteral("height"), display.cancelButton.height);
+        cancelButton.insert(QStringLiteral("hovered"), display.cancelButton.hovered);
+        cancelButton.insert(QStringLiteral("pressed"), display.cancelButton.pressed);
+        cancelButton.insert(QStringLiteral("label"), ToQString(display.cancelButton.label));
+        data.insert(QStringLiteral("cancelButton"), cancelButton);
+
+        QVariantList rows;
+        rows.reserve(static_cast<qsizetype>(display.rows.size()));
+        for (const UIItemIdentifyWnd::DisplayRow& row : display.rows) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("itemIndex"), static_cast<uint>(row.itemIndex));
+            entry.insert(QStringLiteral("itemId"), static_cast<uint>(row.itemId));
+            entry.insert(QStringLiteral("identified"), row.identified);
+            entry.insert(QStringLiteral("x"), row.x);
+            entry.insert(QStringLiteral("y"), row.y);
+            entry.insert(QStringLiteral("width"), row.width);
+            entry.insert(QStringLiteral("height"), row.height);
+            entry.insert(QStringLiteral("hovered"), row.hovered);
+            entry.insert(QStringLiteral("selected"), row.selected);
+            entry.insert(QStringLiteral("count"), row.count);
+            entry.insert(QStringLiteral("label"), ToQString(row.label));
+            rows.push_back(entry);
+        }
+        data.insert(QStringLiteral("rows"), rows);
+
+        QVariantMap scrollBar;
+        scrollBar.insert(QStringLiteral("visible"), display.scrollBar.visible);
+        scrollBar.insert(QStringLiteral("trackX"), display.scrollBar.trackX);
+        scrollBar.insert(QStringLiteral("trackY"), display.scrollBar.trackY);
+        scrollBar.insert(QStringLiteral("trackWidth"), display.scrollBar.trackWidth);
+        scrollBar.insert(QStringLiteral("trackHeight"), display.scrollBar.trackHeight);
+        scrollBar.insert(QStringLiteral("thumbX"), display.scrollBar.thumbX);
+        scrollBar.insert(QStringLiteral("thumbY"), display.scrollBar.thumbY);
+        scrollBar.insert(QStringLiteral("thumbWidth"), display.scrollBar.thumbWidth);
+        scrollBar.insert(QStringLiteral("thumbHeight"), display.scrollBar.thumbHeight);
+        data.insert(QStringLiteral("scrollBar"), scrollBar);
+    }
+    state->setItemIdentifyData(data);
+}
+
+void PopulateItemCompositionState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIItemCompositionWnd* const itemCompositionWnd = g_windowMgr.m_itemCompositionWnd;
+    const bool visible = IsGameplayWindowVisible(state, itemCompositionWnd);
+    state->setItemCompositionVisible(visible);
+    if (!visible) {
+        state->setItemCompositionGeometry(0, 0, 0, 0);
+        state->setItemCompositionData(QVariantMap{});
+        return;
+    }
+
+    state->setItemCompositionGeometry(itemCompositionWnd->m_x, itemCompositionWnd->m_y, itemCompositionWnd->m_w, itemCompositionWnd->m_h);
+
+    UIItemCompositionWnd::DisplayData display{};
+    QVariantMap data;
+    if (itemCompositionWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), ToQString(display.title));
+        data.insert(QStringLiteral("emptyText"), ToQString(display.emptyText));
+
+        QVariantMap closeButton;
+        closeButton.insert(QStringLiteral("x"), display.closeButton.x);
+        closeButton.insert(QStringLiteral("y"), display.closeButton.y);
+        closeButton.insert(QStringLiteral("width"), display.closeButton.width);
+        closeButton.insert(QStringLiteral("height"), display.closeButton.height);
+        closeButton.insert(QStringLiteral("hovered"), display.closeButton.hovered);
+        closeButton.insert(QStringLiteral("pressed"), display.closeButton.pressed);
+        closeButton.insert(QStringLiteral("label"), ToQString(display.closeButton.label));
+        data.insert(QStringLiteral("closeButton"), closeButton);
+
+        QVariantMap okButton;
+        okButton.insert(QStringLiteral("x"), display.okButton.x);
+        okButton.insert(QStringLiteral("y"), display.okButton.y);
+        okButton.insert(QStringLiteral("width"), display.okButton.width);
+        okButton.insert(QStringLiteral("height"), display.okButton.height);
+        okButton.insert(QStringLiteral("hovered"), display.okButton.hovered);
+        okButton.insert(QStringLiteral("pressed"), display.okButton.pressed);
+        okButton.insert(QStringLiteral("enabled"), display.okButton.enabled);
+        okButton.insert(QStringLiteral("label"), ToQString(display.okButton.label));
+        data.insert(QStringLiteral("okButton"), okButton);
+
+        QVariantMap cancelButton;
+        cancelButton.insert(QStringLiteral("x"), display.cancelButton.x);
+        cancelButton.insert(QStringLiteral("y"), display.cancelButton.y);
+        cancelButton.insert(QStringLiteral("width"), display.cancelButton.width);
+        cancelButton.insert(QStringLiteral("height"), display.cancelButton.height);
+        cancelButton.insert(QStringLiteral("hovered"), display.cancelButton.hovered);
+        cancelButton.insert(QStringLiteral("pressed"), display.cancelButton.pressed);
+        cancelButton.insert(QStringLiteral("label"), ToQString(display.cancelButton.label));
+        data.insert(QStringLiteral("cancelButton"), cancelButton);
+
+        QVariantList rows;
+        rows.reserve(static_cast<qsizetype>(display.rows.size()));
+        for (const UIItemCompositionWnd::DisplayRow& row : display.rows) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("itemIndex"), static_cast<uint>(row.itemIndex));
+            entry.insert(QStringLiteral("itemId"), static_cast<uint>(row.itemId));
+            entry.insert(QStringLiteral("identified"), row.identified);
+            entry.insert(QStringLiteral("x"), row.x);
+            entry.insert(QStringLiteral("y"), row.y);
+            entry.insert(QStringLiteral("width"), row.width);
+            entry.insert(QStringLiteral("height"), row.height);
+            entry.insert(QStringLiteral("hovered"), row.hovered);
+            entry.insert(QStringLiteral("selected"), row.selected);
+            entry.insert(QStringLiteral("count"), row.count);
+            entry.insert(QStringLiteral("label"), ToQString(row.label));
+            rows.push_back(entry);
+        }
+        data.insert(QStringLiteral("rows"), rows);
+
+        QVariantMap scrollBar;
+        scrollBar.insert(QStringLiteral("visible"), display.scrollBar.visible);
+        scrollBar.insert(QStringLiteral("trackX"), display.scrollBar.trackX);
+        scrollBar.insert(QStringLiteral("trackY"), display.scrollBar.trackY);
+        scrollBar.insert(QStringLiteral("trackWidth"), display.scrollBar.trackWidth);
+        scrollBar.insert(QStringLiteral("trackHeight"), display.scrollBar.trackHeight);
+        scrollBar.insert(QStringLiteral("thumbX"), display.scrollBar.thumbX);
+        scrollBar.insert(QStringLiteral("thumbY"), display.scrollBar.thumbY);
+        scrollBar.insert(QStringLiteral("thumbWidth"), display.scrollBar.thumbWidth);
+        scrollBar.insert(QStringLiteral("thumbHeight"), display.scrollBar.thumbHeight);
+        data.insert(QStringLiteral("scrollBar"), scrollBar);
+    }
+    state->setItemCompositionData(data);
+}
+
+void PopulateOptionState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIOptionWnd* const optionWnd = g_windowMgr.m_optionWnd;
+    const bool visible = IsGameplayWindowVisible(state, optionWnd);
+    state->setOptionVisible(visible);
+    if (!visible) {
+        state->setOptionGeometry(0, 0, 0, 0);
+        state->setOptionData(QVariantMap{});
+        return;
+    }
+
+    state->setOptionGeometry(optionWnd->m_x, optionWnd->m_y, optionWnd->m_w, optionWnd->m_h);
+
+    UIOptionWnd::DisplayData display{};
+    QVariantMap data;
+    if (optionWnd->GetDisplayDataForQt(&display)) {
+        data.insert(QStringLiteral("title"), QStringLiteral("Options"));
+        data.insert(QStringLiteral("collapsed"), display.collapsed);
+        data.insert(QStringLiteral("activeTab"), display.activeTab);
+        data.insert(QStringLiteral("contentX"), display.contentX);
+        data.insert(QStringLiteral("contentY"), display.contentY);
+        data.insert(QStringLiteral("contentWidth"), display.contentWidth);
+        data.insert(QStringLiteral("contentHeight"), display.contentHeight);
+
+        QVariantList systemButtons;
+        systemButtons.reserve(static_cast<qsizetype>(display.systemButtons.size()));
+        for (const UIOptionWnd::DisplayButton& buttonDisplay : display.systemButtons) {
+            QVariantMap button;
+            button.insert(QStringLiteral("x"), buttonDisplay.x);
+            button.insert(QStringLiteral("y"), buttonDisplay.y);
+            button.insert(QStringLiteral("width"), buttonDisplay.width);
+            button.insert(QStringLiteral("height"), buttonDisplay.height);
+            button.insert(QStringLiteral("visible"), buttonDisplay.visible);
+            button.insert(QStringLiteral("label"), ToQString(buttonDisplay.label));
+            systemButtons.push_back(button);
+        }
+        data.insert(QStringLiteral("systemButtons"), systemButtons);
+
+        QVariantMap restartButton;
+        restartButton.insert(QStringLiteral("x"), display.restartButton.x);
+        restartButton.insert(QStringLiteral("y"), display.restartButton.y);
+        restartButton.insert(QStringLiteral("width"), display.restartButton.width);
+        restartButton.insert(QStringLiteral("height"), display.restartButton.height);
+        restartButton.insert(QStringLiteral("visible"), display.restartButton.visible);
+        restartButton.insert(QStringLiteral("label"), ToQString(display.restartButton.label));
+        data.insert(QStringLiteral("restartButton"), restartButton);
+
+        QVariantMap applyButton;
+        applyButton.insert(QStringLiteral("x"), display.applyButton.x);
+        applyButton.insert(QStringLiteral("y"), display.applyButton.y);
+        applyButton.insert(QStringLiteral("width"), display.applyButton.width);
+        applyButton.insert(QStringLiteral("height"), display.applyButton.height);
+        applyButton.insert(QStringLiteral("visible"), display.applyButton.visible);
+        applyButton.insert(QStringLiteral("label"), ToQString(display.applyButton.label));
+        data.insert(QStringLiteral("applyButton"), applyButton);
+
+        QVariantList tabs;
+        tabs.reserve(static_cast<qsizetype>(display.tabs.size()));
+        for (const UIOptionWnd::DisplayTab& tab : display.tabs) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), tab.x);
+            entry.insert(QStringLiteral("y"), tab.y);
+            entry.insert(QStringLiteral("width"), tab.width);
+            entry.insert(QStringLiteral("height"), tab.height);
+            entry.insert(QStringLiteral("active"), tab.active);
+            entry.insert(QStringLiteral("label"), ToQString(tab.label));
+            tabs.push_back(entry);
+        }
+        data.insert(QStringLiteral("tabs"), tabs);
+
+        QVariantList toggles;
+        toggles.reserve(static_cast<qsizetype>(display.toggles.size()));
+        for (const UIOptionWnd::DisplayToggle& toggle : display.toggles) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), toggle.x);
+            entry.insert(QStringLiteral("y"), toggle.y);
+            entry.insert(QStringLiteral("width"), toggle.width);
+            entry.insert(QStringLiteral("height"), toggle.height);
+            entry.insert(QStringLiteral("checked"), toggle.checked);
+            entry.insert(QStringLiteral("label"), ToQString(toggle.label));
+            toggles.push_back(entry);
+        }
+        data.insert(QStringLiteral("toggles"), toggles);
+
+        QVariantList sliders;
+        sliders.reserve(static_cast<qsizetype>(display.sliders.size()));
+        for (const UIOptionWnd::DisplaySlider& slider : display.sliders) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), slider.x);
+            entry.insert(QStringLiteral("y"), slider.y);
+            entry.insert(QStringLiteral("width"), slider.width);
+            entry.insert(QStringLiteral("height"), slider.height);
+            entry.insert(QStringLiteral("value"), slider.value);
+            entry.insert(QStringLiteral("minValue"), slider.minValue);
+            entry.insert(QStringLiteral("maxValue"), slider.maxValue);
+            entry.insert(QStringLiteral("label"), ToQString(slider.label));
+            entry.insert(QStringLiteral("valueText"), ToQString(slider.valueText));
+            sliders.push_back(entry);
+        }
+        data.insert(QStringLiteral("sliders"), sliders);
+
+        QVariantList graphicsRows;
+        graphicsRows.reserve(static_cast<qsizetype>(display.graphicsRows.size()));
+        for (const UIOptionWnd::DisplayGraphicsRow& row : display.graphicsRows) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), row.x);
+            entry.insert(QStringLiteral("y"), row.y);
+            entry.insert(QStringLiteral("width"), row.width);
+            entry.insert(QStringLiteral("height"), row.height);
+            entry.insert(QStringLiteral("prevX"), row.prevX);
+            entry.insert(QStringLiteral("prevY"), row.prevY);
+            entry.insert(QStringLiteral("prevWidth"), row.prevWidth);
+            entry.insert(QStringLiteral("prevHeight"), row.prevHeight);
+            entry.insert(QStringLiteral("nextX"), row.nextX);
+            entry.insert(QStringLiteral("nextY"), row.nextY);
+            entry.insert(QStringLiteral("nextWidth"), row.nextWidth);
+            entry.insert(QStringLiteral("nextHeight"), row.nextHeight);
+            entry.insert(QStringLiteral("prevLabel"), ToQString(row.prevLabel));
+            entry.insert(QStringLiteral("nextLabel"), ToQString(row.nextLabel));
+            entry.insert(QStringLiteral("label"), ToQString(row.label));
+            entry.insert(QStringLiteral("value"), ToQString(row.value));
+            graphicsRows.push_back(entry);
+        }
+        data.insert(QStringLiteral("graphicsRows"), graphicsRows);
+    }
+    state->setOptionData(data);
+}
+
+void PopulateMinimapState(QtUiState* state)
+{
+    if (!state) {
+        return;
+    }
+
+    const UIRoMapWnd* const minimapWnd = g_windowMgr.m_roMapWnd;
+    const bool visible = IsGameplayWindowVisible(state, minimapWnd) && minimapWnd->HasLoadedMinimap();
+    state->setMinimapVisible(visible);
+    if (!visible) {
+        state->setMinimapGeometry(0, 0, 0, 0);
+        state->setMinimapData(QVariantMap{});
+        return;
+    }
+
+    state->setMinimapGeometry(minimapWnd->m_x, minimapWnd->m_y, minimapWnd->m_w, minimapWnd->m_h);
+
+    UIRoMapWnd::DisplayData display{};
+    QVariantMap data;
+    if (minimapWnd->GetDisplayDataForQt(&display)) {
+        const QString mapName = ToQString(display.mapName);
+        data.insert(QStringLiteral("title"), mapName.isEmpty()
+            ? QStringLiteral("Mini Map")
+            : QStringLiteral("Mini Map - %1").arg(mapName));
+        data.insert(QStringLiteral("closeLabel"), QStringLiteral("x"));
+        data.insert(QStringLiteral("mapX"), display.mapX);
+        data.insert(QStringLiteral("mapY"), display.mapY);
+        data.insert(QStringLiteral("mapWidth"), display.mapWidth);
+        data.insert(QStringLiteral("mapHeight"), display.mapHeight);
+        data.insert(QStringLiteral("playerVisible"), display.playerVisible);
+        data.insert(QStringLiteral("playerX"), display.playerX);
+        data.insert(QStringLiteral("playerY"), display.playerY);
+        data.insert(QStringLiteral("playerDirection"), display.playerDirection);
+        data.insert(QStringLiteral("closeX"), display.closeX);
+        data.insert(QStringLiteral("closeY"), display.closeY);
+        data.insert(QStringLiteral("closeWidth"), display.closeWidth);
+        data.insert(QStringLiteral("closeHeight"), display.closeHeight);
+        data.insert(QStringLiteral("closePressed"), display.closePressed);
+        data.insert(QStringLiteral("coordsX"), display.coordsX);
+        data.insert(QStringLiteral("coordsY"), display.coordsY);
+        data.insert(QStringLiteral("coordsWidth"), display.coordsWidth);
+        data.insert(QStringLiteral("coordsHeight"), display.coordsHeight);
+        data.insert(QStringLiteral("imageRevision"), display.imageRevision);
+        data.insert(QStringLiteral("mapName"), mapName);
+        data.insert(QStringLiteral("coordsText"), ToQString(display.coordsText));
+
+        QVariantList markers;
+        markers.reserve(static_cast<qsizetype>(display.markers.size()));
+        for (const UIRoMapWnd::DisplayMarker& marker : display.markers) {
+            QVariantMap entry;
+            entry.insert(QStringLiteral("x"), marker.x);
+            entry.insert(QStringLiteral("y"), marker.y);
+            entry.insert(QStringLiteral("radius"), marker.radius);
+            entry.insert(QStringLiteral("color"), QStringLiteral("#%1").arg(marker.color & 0x00FFFFFFu, 6, 16, QLatin1Char('0')));
+            markers.push_back(entry);
+        }
+        data.insert(QStringLiteral("markers"), markers);
+    }
+    state->setMinimapData(data);
+}
+
+void PopulateStatusIconsState(QtUiState* state, int mouseX, int mouseY)
+{
+    if (!state) {
+        return;
+    }
+
+    const u32 now = g_session.GetServerTime();
+    g_session.PruneExpiredStatusIcons(now);
+
+    QVariantList icons;
+    const std::vector<ACTIVE_STATUS_ICON>& activeIcons = g_session.GetActiveStatusIcons();
+    icons.reserve(static_cast<qsizetype>(activeIcons.size()));
+    const int hoveredIndex = FindHoveredStatusIconIndex(state, mouseX, mouseY);
+    for (const ACTIVE_STATUS_ICON& entry : activeIcons) {
+        const qtui::StatusIconCatalogEntry* const catalogEntry = qtui::FindStatusIconCatalogEntry(entry.statusType);
+        const int skillId = catalogEntry ? catalogEntry->skillId : 0;
+        const u32 remainingMs = (entry.hasTimer && entry.expireServerTime > now)
+            ? (entry.expireServerTime - now)
+            : 0;
+        const QString label = ResolveStatusIconLabel(entry.statusType, skillId);
+
+        QVariantMap icon;
+        icon.insert(QStringLiteral("statusType"), entry.statusType);
+        icon.insert(QStringLiteral("skillId"), skillId);
+        icon.insert(QStringLiteral("name"), label);
+        icon.insert(QStringLiteral("shortName"), BuildStatusIconShortLabel(label));
+        icon.insert(QStringLiteral("timed"), entry.hasTimer);
+        icon.insert(QStringLiteral("remainingMs"), static_cast<int>(remainingMs));
+        icon.insert(QStringLiteral("hovered"), hoveredIndex == icons.size());
+        icons.push_back(icon);
+    }
+
+    state->setStatusIcons(icons);
+}
+
+bool IsMonsterLikeHoverActor(const CGameActor* actor)
+{
+    if (!actor || actor->m_isPc != 0) {
+        return false;
+    }
+
+    const int job = actor->m_job;
+    return job >= 1000 && (job < 6001 || job > 6047);
+}
+
+bool ShouldUseServerNameForHoverActor(const CGameActor* actor)
+{
+    if (!actor) {
+        return false;
+    }
+
+    if (actor->m_isPc) {
+        return true;
+    }
+
+    if (IsMonsterLikeHoverActor(actor)) {
+        return true;
+    }
+
+    return actor->m_objectType == 6;
+}
+
+const NamePair* FindCachedHoverActorNameEntry(const CGameMode& mode, const CGameActor* actor)
+{
+    if (!actor) {
+        return nullptr;
+    }
+
+    const auto cachedNameIt = mode.m_actorNameListByGID.find(actor->m_gid);
+    if (cachedNameIt == mode.m_actorNameListByGID.end()) {
+        return nullptr;
+    }
+
+    return &cachedNameIt->second;
+}
+
+std::string ResolveFallbackPartyNameForHoverActor(const std::string& actorName, const CGameActor* actor)
+{
+    if (!actor || g_session.m_partyName.empty()) {
+        return std::string();
+    }
+
+    if (actor->m_gid == g_session.m_gid || actor->m_gid == g_session.m_aid) {
+        return g_session.m_partyName;
+    }
+
+    if (actorName.empty()) {
+        return std::string();
+    }
+
+    const std::list<FRIEND_INFO>& partyMembers = g_session.GetPartyList();
+    for (const FRIEND_INFO& member : partyMembers) {
+        if (member.characterName == actorName) {
+            return g_session.m_partyName;
+        }
+    }
+
+    return std::string();
+}
+
+std::string BuildHoverActorLabel(const std::string& actorName, const NamePair* cachedEntry, const CGameActor* actor)
+{
+    if (actorName.empty()) {
+        return std::string();
+    }
+
+    std::string label = actorName;
+    std::string partyName = cachedEntry ? cachedEntry->partyName : std::string();
+    if (partyName.empty()) {
+        partyName = ResolveFallbackPartyNameForHoverActor(actorName, actor);
+    }
+    if (!partyName.empty()) {
+        label += " (";
+        label += partyName;
+        label += ")";
+    }
+
+    const std::string guildName = cachedEntry ? cachedEntry->guildName : std::string();
+    if (!guildName.empty()) {
+        label += "\n";
+        label += guildName;
+
+        const std::string guildTitle = cachedEntry ? cachedEntry->guildTitle : std::string();
+        if (!guildTitle.empty()) {
+            label += " [";
+            label += guildTitle;
+            label += "]";
+        }
+    }
+
+    return label;
+}
+
+void SendActorNameRequest(CGameMode& mode, u32 gid)
+{
+    if (gid == 0 || gid == g_session.m_gid) {
+        return;
+    }
+
+    const u32 now = GetTickCount();
+    const auto timerIt = mode.m_actorNameByGIDReqTimer.find(gid);
+    if (timerIt != mode.m_actorNameByGIDReqTimer.end() && now - timerIt->second < kHoverNameRequestCooldownMs) {
+        return;
+    }
+
+    bool sent = false;
+    if (ro::net::IsLegacyMapGameplaySendProfile()) {
+        PACKET_CZ_REQNAME_LEGACY packet{};
+        packet.PacketType = ro::net::GetActiveMapGameplaySendProfile().getCharNameRequest;
+        packet.GID = gid;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)));
+    } else {
+        PACKET_CZ_REQNAME2 packet{};
+        packet.PacketType = ro::net::GetActiveMapGameplaySendProfile().getCharNameRequest;
+        FillPacketPadding(packet.padding, static_cast<int>(sizeof(packet.padding)));
+        packet.GID = gid;
+        sent = CRagConnection::instance()->SendPacket(reinterpret_cast<const char*>(&packet), static_cast<int>(sizeof(packet)));
+    }
+    if (sent) {
+        mode.m_actorNameByGIDReqTimer[gid] = now;
+    }
+}
+
+std::string ResolveActorLabel(const CGameMode& mode, CGameActor* actor)
+{
+    if (!actor) {
+        return std::string();
+    }
+
+    const NamePair* const cachedEntry = FindCachedHoverActorNameEntry(mode, actor);
+
+    if (actor->m_gid == g_session.m_gid) {
+        const char* playerName = g_session.GetPlayerName();
+        if (playerName && *playerName) {
+            return BuildHoverActorLabel(playerName, cachedEntry, actor);
+        }
+    }
+
+    if (cachedEntry && !cachedEntry->name.empty()) {
+        return BuildHoverActorLabel(cachedEntry->name, cachedEntry, actor);
+    }
+
+    if (ShouldUseServerNameForHoverActor(actor)) {
+        SendActorNameRequest(const_cast<CGameMode&>(mode), actor->m_gid);
+        if (actor->m_isPc) {
+            return "Player";
+        }
+        if (IsMonsterLikeHoverActor(actor)) {
+            return "Monster";
+        }
+        return "NPC";
+    }
+
+    const char* jobName = g_session.GetJobName(actor->m_job);
+    if (jobName && *jobName) {
+        return jobName;
+    }
+
+    return "Entity";
+}
+
+std::string ResolveGroundItemLabel(const CItem* item)
+{
+    return item ? shopui::BuildGroundItemHoverText(item->m_itemName,
+                      item->m_itemId,
+                      item->m_identified != 0,
+                      static_cast<unsigned int>(item->m_amount))
+                : std::string();
+}
+
+QString ResolveHoverBackground(const CGameActor* actor)
+{
+    if (!actor) {
+        return QStringLiteral("#c05a1620");
+    }
+
+    if (IsMonsterLikeHoverActor(actor)) {
+        return QStringLiteral("#c0be185d");
+    }
+
+    if (actor->m_isPc) {
+        return QStringLiteral("#c05c2a86");
+    }
+
+    if (actor->m_objectType == 6) {
+        return QStringLiteral("#c02d63b6");
+    }
+
+    return QStringLiteral("#c05a1620");
+}
+
+QString ResolveHoverForeground(const CGameActor* actor)
+{
+    if (!actor) {
+        return QStringLiteral("#ffffff");
+    }
+
+    u32 actorId = actor->m_gid;
+    if (actorId != 0 && (actorId == g_session.m_gid || actorId == g_session.m_aid)) {
+        actorId = g_session.m_aid != 0 ? g_session.m_aid : actorId;
+    }
+    return IsNameYellow(actorId) ? QStringLiteral("#ffff00") : QStringLiteral("#ffffff");
+}
+
+QVariantMap MakeAnchor(const QString& text,
+    int screenX,
+    int screenY,
+    const QString& background,
+    const QString& foreground = QStringLiteral("#ffffff"),
+    bool showBubble = true,
+    int fontPixelSize = 14,
+    bool bold = true)
+{
+    QVariantMap anchor;
+    anchor.insert(QStringLiteral("text"), text);
+    anchor.insert(QStringLiteral("x"), screenX + 12);
+    anchor.insert(QStringLiteral("y"), screenY - 26);
+    anchor.insert(QStringLiteral("background"), background);
+    anchor.insert(QStringLiteral("foreground"), foreground);
+    anchor.insert(QStringLiteral("showBubble"), showBubble);
+    anchor.insert(QStringLiteral("fontPixelSize"), fontPixelSize);
+    anchor.insert(QStringLiteral("bold"), bold);
+    return anchor;
+}
+
+QVariantMap MakeCenteredAnchor(const QString& text,
+    int centerX,
+    int topY,
+    const QString& background,
+    const QString& foreground = QStringLiteral("#ffffff"),
+    bool showBubble = true,
+    int fontPixelSize = 14,
+    bool bold = true)
+{
+    QFont font;
+    font.setPixelSize(fontPixelSize);
+    font.setBold(bold);
+    const QFontMetrics metrics(font);
+    const int textWidth = (std::max)(1, metrics.horizontalAdvance(text));
+    const int textHeight = (std::max)(1, metrics.height());
+    const int bubbleWidth = textWidth + (showBubble ? 12 : 0);
+    const int bubbleHeight = textHeight + (showBubble ? 8 : 0);
+
+    QVariantMap anchor;
+    anchor.insert(QStringLiteral("text"), text);
+    anchor.insert(QStringLiteral("x"), centerX - bubbleWidth / 2);
+    anchor.insert(QStringLiteral("y"), topY);
+    anchor.insert(QStringLiteral("background"), background);
+    anchor.insert(QStringLiteral("foreground"), foreground);
+    anchor.insert(QStringLiteral("showBubble"), showBubble);
+    anchor.insert(QStringLiteral("fontPixelSize"), fontPixelSize);
+    anchor.insert(QStringLiteral("bold"), bold);
+    return anchor;
+}
+
+QVariantMap MakeSpeechBubbleAnchor(const QString& text,
+    int centerX,
+    int bottomY)
+{
+    QVariantMap anchor;
+    anchor.insert(QStringLiteral("text"), text);
+    anchor.insert(QStringLiteral("centerX"), centerX);
+    anchor.insert(QStringLiteral("bottomY"), bottomY);
+    anchor.insert(QStringLiteral("background"), QStringLiteral("#de333333"));
+    anchor.insert(QStringLiteral("foreground"), QStringLiteral("#ffffff"));
+    anchor.insert(QStringLiteral("showBubble"), true);
+    anchor.insert(QStringLiteral("fontPixelSize"), 14);
+    anchor.insert(QStringLiteral("bold"), false);
+    anchor.insert(QStringLiteral("wrap"), true);
+    anchor.insert(QStringLiteral("maxTextWidth"), kQtSpeechBubbleMaxTextWidth);
+    anchor.insert(QStringLiteral("paddingX"), 16);
+    anchor.insert(QStringLiteral("paddingY"), 12);
+    anchor.insert(QStringLiteral("radius"), 8);
+    anchor.insert(QStringLiteral("borderColor"), QStringLiteral("#80686868"));
+    anchor.insert(QStringLiteral("z"), 2100);
+    return anchor;
+}
+
+QVariantMap MakePartyHpBarAnchor(int centerX, int topY, int currentHp, int maxHp)
+{
+    QVariantMap anchor;
+    anchor.insert(QStringLiteral("kind"), QStringLiteral("partyHpBar"));
+    anchor.insert(QStringLiteral("x"), centerX - 30);
+    anchor.insert(QStringLiteral("y"), topY);
+    anchor.insert(QStringLiteral("width"), 60);
+    anchor.insert(QStringLiteral("height"), 5);
+    anchor.insert(QStringLiteral("currentHp"), currentHp);
+    anchor.insert(QStringLiteral("maxHp"), maxHp);
+    anchor.insert(QStringLiteral("z"), 2050);
+    return anchor;
+}
+
+QVariantMap MakeUiItemAnchor(const shopui::ItemHoverInfo& hoverInfo)
+{
+    const int logicalCenterX = hoverInfo.anchorRect.left + ((hoverInfo.anchorRect.right - hoverInfo.anchorRect.left) / 2);
+    const int logicalTopY = hoverInfo.anchorRect.top - 26;
+    return MakeCenteredAnchor(ToQString(hoverInfo.text),
+        UiScaleLogicalToRawCoordinate(logicalCenterX),
+        UiScaleLogicalToRawCoordinate(logicalTopY),
+    QStringLiteral("#c0087f5b"),
+    hoverInfo.identified ? QStringLiteral("#ffffff") : QStringLiteral("#b8b8b8"));
+}
+
+bool TryAppendHoveredUiItemAnchor(QVariantList* anchors)
+{
+    if (!anchors) {
+        return false;
+    }
+
+    shopui::ItemHoverInfo hoverInfo{};
+    if (g_windowMgr.m_storageWnd && g_windowMgr.m_storageWnd->GetHoveredItemForQt(&hoverInfo) && hoverInfo.IsValid()) {
+        anchors->push_back(MakeUiItemAnchor(hoverInfo));
+        return true;
+    }
+
+    hoverInfo = shopui::ItemHoverInfo{};
+    if (g_windowMgr.m_itemWnd && g_windowMgr.m_itemWnd->GetHoveredItemForQt(&hoverInfo) && hoverInfo.IsValid()) {
+        anchors->push_back(MakeUiItemAnchor(hoverInfo));
+        return true;
+    }
+
+    hoverInfo = shopui::ItemHoverInfo{};
+    if (g_windowMgr.m_equipWnd && g_windowMgr.m_equipWnd->GetHoveredItemForQt(&hoverInfo) && hoverInfo.IsValid()) {
+        anchors->push_back(MakeUiItemAnchor(hoverInfo));
+        return true;
+    }
+
+    hoverInfo = shopui::ItemHoverInfo{};
+    if (g_windowMgr.m_shortCutWnd && g_windowMgr.m_shortCutWnd->GetHoveredItemForQt(&hoverInfo) && hoverInfo.IsValid()) {
+        anchors->push_back(MakeUiItemAnchor(hoverInfo));
+        return true;
+    }
+
+    return false;
+}
+
+} // namespace
+
+QtUiStateAdapter::QtUiStateAdapter()
+    : m_state(new QtUiState())
+{
+    m_state->setLastInput(QStringLiteral("No routed input yet."));
+}
+
+QtUiStateAdapter::~QtUiStateAdapter()
+{
+    delete m_state;
+    m_state = nullptr;
+}
+
+QObject* QtUiStateAdapter::stateObject() const
+{
+    return m_state;
+}
+
+void QtUiStateAdapter::setLastInput(const QString& value)
+{
+    if (m_state) {
+        m_state->setLastInput(value.isEmpty() ? QStringLiteral("No routed input yet.") : value);
+    }
+}
+
+bool QtUiStateAdapter::syncMenu(RenderBackendType activeBackend,
+    RenderBackendType nativeOverlayBackend)
+{
+    if (!m_state) {
+        return false;
+    }
+
+    const QString backendName = BackendToQString(activeBackend);
+    const QString modeName = BuildMenuModeText();
+    const QString wallpaperRevision = BuildWallpaperRevisionText();
+    const QString renderPath = BuildRenderPathText(nativeOverlayBackend);
+    const QString loginStatus = ToQString(g_windowMgr.GetLoginStatus());
+    const QString chatPreview = BuildChatPreviewText();
+    const QString lastInput = m_state->lastInput();
+
+    m_state->setBackendName(backendName);
+    m_state->setModeName(modeName);
+    m_state->setWallpaperRevision(wallpaperRevision);
+    m_state->setRenderPath(renderPath);
+    m_state->setArchitectureNote(BuildArchitectureNote(nativeOverlayBackend));
+    m_state->setLoginStatus(loginStatus);
+    m_state->setChatPreview(chatPreview);
+    m_state->setUiScale(static_cast<double>(GetConfiguredUiScaleFactor()));
+    m_state->setDebugOverlayData(BuildDebugOverlayData(
+        backendName,
+        modeName,
+        renderPath,
+        loginStatus,
+        chatPreview,
+        lastInput));
+    PopulateLoginPanelState(m_state);
+    PopulateCharSelectState(m_state);
+    PopulateMakeCharState(m_state);
+    PopulateServerSelectState(m_state);
+    PopulateLoadingState(m_state);
+    ClearGameplayUiState(m_state);
+    return true;
+}
+
+bool QtUiStateAdapter::syncGameplay(CGameMode& mode,
+    RenderBackendType activeBackend,
+    RenderBackendType nativeOverlayBackend,
+    int mouseX,
+    int mouseY)
+{
+    if (!m_state) {
+        return false;
+    }
+
+    const QString backendName = BackendToQString(activeBackend);
+    const QString modeName = QStringLiteral("Gameplay");
+    const QString wallpaperRevision = BuildWallpaperRevisionText();
+    const QString renderPath = BuildRenderPathText(nativeOverlayBackend);
+    const QString loginStatus = ToQString(g_windowMgr.GetLoginStatus());
+    const QString chatPreview = BuildChatPreviewText();
+    const QString lastInput = m_state->lastInput();
+
+    m_state->setBackendName(backendName);
+    m_state->setModeName(modeName);
+    m_state->setWallpaperRevision(wallpaperRevision);
+    m_state->setRenderPath(renderPath);
+    m_state->setArchitectureNote(BuildArchitectureNote(nativeOverlayBackend));
+    m_state->setLoginStatus(loginStatus);
+    m_state->setChatPreview(chatPreview);
+    m_state->setUiScale(static_cast<double>(GetConfiguredUiScaleFactor()));
+    m_state->setDebugOverlayData(BuildDebugOverlayData(
+        backendName,
+        modeName,
+        renderPath,
+        loginStatus,
+        chatPreview,
+        lastInput));
+    PopulateLoginPanelState(m_state);
+    PopulateCharSelectState(m_state);
+    PopulateMakeCharState(m_state);
+    PopulateServerSelectState(m_state);
+    PopulateLoadingState(m_state);
+    PopulateNpcMenuState(m_state);
+    PopulateSayDialogState(m_state);
+    PopulateNpcInputState(m_state);
+    PopulateChooseMenuState(m_state);
+    PopulateItemShopState(m_state);
+    PopulateItemPurchaseState(m_state);
+    PopulateItemSellState(m_state);
+    PopulateShortCutState(m_state);
+    PopulateBasicInfoState(m_state);
+    PopulateStatusState(m_state);
+    PopulateChatWindowState(m_state);
+    PopulateRechargeGaugeState(m_state);
+    PopulateInventoryState(m_state);
+    PopulateStorageState(m_state);
+    PopulateFriendPartyState(m_state);
+    PopulatePartySetupState(m_state);
+    PopulatePartyInviteState(m_state);
+    PopulateEquipState(m_state);
+    PopulateSkillListState(m_state);
+    PopulateItemInfoState(m_state);
+    PopulateSkillDescribeState(m_state);
+    PopulateItemCollectionState(m_state);
+    PopulateItemIdentifyState(m_state);
+    PopulateItemCompositionState(m_state);
+    PopulateOptionState(m_state);
+    PopulateMinimapState(m_state);
+    const int uiMouseX = UiScaleRawToLogicalCoordinate(mouseX);
+    const int uiMouseY = UiScaleRawToLogicalCoordinate(mouseY);
+    PopulateStatusIconsState(m_state, uiMouseX, uiMouseY);
+    PopulateShopChoiceState(m_state);
+    PopulateNotificationState(m_state);
+
+    QVariantList anchors;
+    if (mode.m_world && mode.m_view) {
+        const matrix& viewMatrix = mode.m_view->GetViewMatrix();
+        const float cameraLongitude = mode.m_view->GetCameraLongitude();
+        const u32 now = GetTickCount();
+
+        auto appendPartyHpAnchor = [&](CGameActor* actor) {
+            if (!actor || actor->m_isPc == 0 || !actor->m_isVisible) {
+                return;
+            }
+            if (actor->m_gid == g_session.m_gid || actor->m_gid == g_session.m_aid) {
+                return;
+            }
+            if (actor->m_stateId == kGameActorDeathStateId) {
+                return;
+            }
+
+            const NamePair* const cachedEntry = FindCachedHoverActorNameEntry(mode, actor);
+            if (!cachedEntry || cachedEntry->name.empty()) {
+                SendActorNameRequest(mode, actor->m_gid);
+                return;
+            }
+
+            const FRIEND_INFO* matchedMember = nullptr;
+            for (const FRIEND_INFO& member : g_session.GetPartyList()) {
+                if (member.characterName == cachedEntry->name) {
+                    matchedMember = &member;
+                    break;
+                }
+            }
+            if (!matchedMember || matchedMember->partyMaxHp <= 0) {
+                return;
+            }
+
+            int centerX = 0;
+            int topY = 0;
+            int labelY = 0;
+            if (!mode.m_world->GetActorScreenMarker(viewMatrix, cameraLongitude, actor->m_gid, &centerX, &topY, &labelY)) {
+                return;
+            }
+
+            anchors.push_back(MakePartyHpBarAnchor(centerX, labelY + 8, matchedMember->partyHp, matchedMember->partyMaxHp));
+        };
+
+        auto appendChatBubbleAnchor = [&](CGameActor* actor) {
+            if (!actor || !actor->m_isVisible || !actor->HasActiveChatBubble(now)) {
+                return;
+            }
+
+            int bubbleX = 0;
+            int bubbleBottomY = 0;
+            if (!mode.m_world->GetActorSpeechBubbleAnchor(viewMatrix, actor->m_gid, &bubbleX, &bubbleBottomY)) {
+                return;
+            }
+
+            anchors.push_back(MakeSpeechBubbleAnchor(ToQString(actor->GetChatBubbleText()),
+                bubbleX,
+                bubbleBottomY));
+        };
+
+        appendChatBubbleAnchor(mode.m_world->m_player);
+        for (const auto& runtimeEntry : mode.m_runtimeActors) {
+            CGameActor* const actor = runtimeEntry.second;
+            if (!actor || actor == mode.m_world->m_player) {
+                continue;
+            }
+            appendPartyHpAnchor(actor);
+            appendChatBubbleAnchor(actor);
+        }
+
+        const bool hasUiItemHover = TryAppendHoveredUiItemAnchor(&anchors);
+        const bool hasStatusIconHover = !hasUiItemHover && TryAppendHoveredStatusIconAnchor(m_state, uiMouseX, uiMouseY, &anchors);
+        const bool blocksWorldHover = g_windowMgr.HasWindowAtPoint(uiMouseX, uiMouseY);
+        const bool blocksGameplayHover = hasUiItemHover || hasStatusIconHover || blocksWorldHover;
+
+        int labelX = 0;
+        int labelY = 0;
+        CGameActor* hoveredActor = nullptr;
+        if (!blocksGameplayHover && mode.m_world->FindHoveredActorScreen(viewMatrix,
+                cameraLongitude,
+                mouseX,
+                mouseY,
+                &hoveredActor,
+                &labelX,
+                &labelY)) {
+            if (!hoveredActor || hoveredActor->m_gid != mode.m_lastLockOnMonGid) {
+                int anchorX = labelX;
+                int anchorY = labelY + kQtActorLabelVerticalOffset;
+                if (hoveredActor == mode.m_world->m_player || hoveredActor->m_gid == g_session.m_gid) {
+                    mode.m_world->GetPlayerScreenLabel(viewMatrix, cameraLongitude, &anchorX, &anchorY);
+                    anchorY += kQtActorLabelVerticalOffset;
+                } else {
+                    mode.m_world->GetActorScreenMarker(viewMatrix, cameraLongitude, hoveredActor->m_gid, &anchorX, nullptr, &anchorY);
+                    anchorY += kQtActorLabelVerticalOffset;
+                }
+                anchors.push_back(MakeCenteredAnchor(ToQString(ResolveActorLabel(mode, hoveredActor)),
+                    anchorX,
+                    anchorY,
+                    ResolveHoverBackground(hoveredActor),
+                    ResolveHoverForeground(hoveredActor)));
+            }
+        } else if (!blocksGameplayHover) {
+            CItem* hoveredItem = nullptr;
+            if (mode.m_world->FindHoveredGroundItemScreen(viewMatrix,
+                    mouseX,
+                    mouseY,
+                    &hoveredItem,
+                    &labelX,
+                    &labelY)) {
+                anchors.push_back(MakeAnchor(ToQString(ResolveGroundItemLabel(hoveredItem)),
+                    labelX,
+                    labelY,
+                    QStringLiteral("#c0087f5b"),
+                    (hoveredItem && hoveredItem->m_identified != 0) ? QStringLiteral("#ffffff") : QStringLiteral("#b8b8b8")));
+            }
+        }
+
+        if (mode.m_lastLockOnMonGid != 0) {
+            const auto actorIt = mode.m_runtimeActors.find(mode.m_lastLockOnMonGid);
+            if (actorIt != mode.m_runtimeActors.end() && actorIt->second && actorIt->second->m_isVisible) {
+                if (mode.m_world->GetActorScreenMarker(viewMatrix,
+                        cameraLongitude,
+                        mode.m_lastLockOnMonGid,
+                        &labelX,
+                        nullptr,
+                        &labelY)) {
+                    const QString lockLabel = ToQString(ResolveActorLabel(mode, actorIt->second));
+                    if (!lockLabel.isEmpty()) {
+                        anchors.push_back(MakeCenteredAnchor(QStringLiteral("▼"),
+                            labelX - 6,
+                            labelY - 24,
+                            QStringLiteral("transparent"),
+                            ToCssColor(255, 226, 120),
+                            false,
+                            20,
+                            true));
+                        anchors.push_back(MakeCenteredAnchor(lockLabel,
+                            labelX,
+                            labelY + kQtActorLabelVerticalOffset,
+                            ResolveHoverBackground(actorIt->second),
+                            ResolveHoverForeground(actorIt->second)));
+                    }
+                }
+            }
+        }
+    }
+
+    m_state->setAnchors(anchors);
+    return true;
+}
